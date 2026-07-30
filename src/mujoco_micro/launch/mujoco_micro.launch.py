@@ -20,7 +20,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'dry_run',
-            default_value='true',
+            default_value='false',
             description='true: calculate and publish debug data, but keep all six motors disabled.',
         ),
         DeclareLaunchArgument(
@@ -30,7 +30,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'velocity_command_enable',
-            default_value='false',
+            default_value='true',
             description='Enable forward velocity commands from the RC stick.',
         ),
         Node(

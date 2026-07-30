@@ -145,10 +145,10 @@ mujoco_micro_node:
     rc:
       # 首次上机默认关闭前进指令；站稳后可通过 launch 参数开启。
       velocity_command_enable: true
-      max_target_velocity_mps: 0.20
+      max_target_velocity_mps: 0.70
       forward_sign: 1.0
       deadband: 0.08
-      velocity_slew_rate_mps2: 0.60
+      velocity_slew_rate_mps2: 1.0
 
     # MuJoCo 最终验证值的“实机符号等效迁移”：
     # 仿真使用 Kpos=-0.12、Kvel=-0.035、position_to_pitch_sign=+1；
