@@ -1,32 +1,28 @@
 mujoco_micro_node:
   ros__parameters:
     control:
-      profile_name: "mujoco_validated_hardware"
+      profile_name: "mujoco_validated_hardware_roll"
       period_s: 0.003
-      # 安全默认：先只计算并发布 /vmc/debug，六个电机均 enable=0。
+      # 保留当前仓库行为：实机输出默认开启。首次替换后建议命令行 dry_run:=true 验证。
       dry_run: false
       joint_control_enable: true
       balance_control_enable: true
 
-    # 完全沿用最初 vmc_micro_ws 中的 EtherCAT 话题。
     topics:
       imu_read: "/ecat/sn1966149/app1/read"
       rc_read: "/ecat/sn2228252/app1/read"
-
       left_joint_a_read: "/ecat/sn2228252/app2/read"
       left_joint_a_write: "/ecat/sn2228252/app2/write"
       left_joint_b_read: "/ecat/sn2228252/app3/read"
       left_joint_b_write: "/ecat/sn2228252/app3/write"
       left_wheel_read: "/ecat/sn2228252/app4/read"
       left_wheel_write: "/ecat/sn2228252/app4/write"
-
       right_joint_a_read: "/ecat/sn2228252/app5/read"
       right_joint_a_write: "/ecat/sn2228252/app5/write"
       right_joint_b_read: "/ecat/sn2228252/app6/read"
       right_joint_b_write: "/ecat/sn2228252/app6/write"
       right_wheel_read: "/ecat/sn2228252/app7/read"
       right_wheel_write: "/ecat/sn2228252/app7/write"
-
       debug: "/vmc/debug"
 
     five_bar:
@@ -38,7 +34,6 @@ mujoco_micro_node:
       singularity_epsilon: 1.0e-5
       reachability_epsilon: 1.0e-7
 
-    # MuJoCo 已验证的长腿目标：B=(35,120) mm。
     leg:
       target_x_m: 0.035
       target_y_m: 0.120
@@ -58,7 +53,6 @@ mujoco_micro_node:
     joint_state:
       velocity_filter_hz: 25.0
 
-    # 与 MuJoCo 中的 MIT 等效参数一致；实机由电机固件执行位置/速度项。
     joint_mit:
       kp: 7.0
       kd: 0.28
@@ -67,14 +61,12 @@ mujoco_micro_node:
       max_arm_joint_error_rad: 0.70
       max_runtime_joint_error_rad: 1.20
 
-    # MuJoCo 验证时腿部和轮毂平衡同时启动，避免定位腿期间机身先倒下。
     leg_positioning:
       balance_wait_for_leg_ready: true
       ready_joint_error_rad: 0.10
       ready_joint_velocity_rad_s: 0.30
       ready_dwell_s: 0.30
 
-    # 实机标定值沿用最初 ROS2 包；不要用 MuJoCo 的 joint.angle_sign 替换这些值。
     joint_calibration:
       left_a:
         motor_zero_rad: -0.340847969
@@ -102,11 +94,18 @@ mujoco_micro_node:
         torque_sign: 1.0
 
     imu:
-      pitch_axis: "pitch"          # 若实机 IMU roll 对应车身 pitch，改为 roll
-      pitch_rate_axis: "y"         # roll 对应时通常改为 x
-      yaw_rate_axis: "z"
+      pitch_axis: "pitch"
+      pitch_rate_axis: "y"
       pitch_sign: 1.0
       pitch_rate_sign: 1.0
+
+      # Roll 使用同一次 switch=1 相对四元数校准。
+      roll_axis: "roll"
+      roll_rate_axis: "x"
+      roll_sign: 1.0
+      roll_rate_sign: 1.0
+
+      yaw_rate_axis: "z"
       yaw_rate_sign: 1.0
 
     safety:
@@ -117,11 +116,13 @@ mujoco_micro_node:
       arm_max_tilt_deg: 10.0
       arm_max_pitch_rate_rad_s: 0.30
       fall_cutoff_deg: 35.0
+      arm_max_roll_deg: 10.0
+      arm_max_roll_rate_rad_s: 0.40
+      fall_cutoff_roll_deg: 25.0
       calibrate_switch_value: 1
       arm_switch_value: 3
       disable_switch_value: 2
 
-    # 下面是实机编码器/电机安装方向，沿用最初 ROS2 包。
     balance:
       mode: "cascade"
       wheel_radius_m: 0.030
@@ -143,21 +144,17 @@ mujoco_micro_node:
       velocity_blend: 0.0
 
     rc:
-      # 首次上机默认关闭前进指令；站稳后可通过 launch 参数开启。
       velocity_command_enable: true
       max_target_velocity_mps: 0.70
       forward_sign: 1.0
       deadband: 0.08
       velocity_slew_rate_mps2: 1.0
 
-    # MuJoCo 最终验证值的“实机符号等效迁移”：
-    # 仿真使用 Kpos=-0.12、Kvel=-0.035、position_to_pitch_sign=+1；
-    # 实机保持正增益并使用原硬件 position_to_pitch_sign=-1，乘积完全等效。
     cascade:
       attitude_k_pitch: 2.2
       attitude_k_pitch_rate: 0.1
-      position_kp_rad_per_m: 0.2 #0.12
-      velocity_kd_rad_per_mps: 0.19 #0.035
+      position_kp_rad_per_m: 0.2
+      velocity_kd_rad_per_mps: 0.19
       position_ki_rad_per_m_s: 0.0
       integral_enable: false
       integral_limit_m_s: 0.20
@@ -174,7 +171,7 @@ mujoco_micro_node:
       max_target_rate_rad_s: 0.80
       rc_sign: -1.0
       rate_slew_rad_s2: 3.0
-      kp_each_nm_per_rad_s: 0.1
+      kp_each_nm_per_rad_s: 0.033
       kd_each_nm_per_rad_s2: 0.0
       deadband_rad_s: 0.02
       rate_filter_hz: 15.0
@@ -182,6 +179,33 @@ mujoco_micro_node:
       torque_limit_each_nm: 0.025
       torque_slew_nm_s: 0.50
       output_sign: 1.0
+
+    # 新增且独立的 Roll 控制。执行器是左右腿高度差，不占用轮毂 Yaw 差动扭矩。
+    # 为保证替换后不改变原有行为，默认 false；完成悬架方向测试后改为 true。
+    roll:
+      enable: true
+      trim_deg: 0.0
+
+      # Roll PD 输出“左右两腿轮心 Y 目标的总差值”。
+      kp_leg_difference_m_per_rad: 0.080
+      kd_leg_difference_m_per_rad_s: 0.008
+
+      # |left_target_y - right_target_y| 的最大值；0.016 表示总差最多 16 mm，单腿各偏 8 mm。
+      max_leg_difference_m: 0.10
+      leg_difference_slew_rate_mps: 0.040
+
+      # right_x 满杆对应的最大 Roll 目标角和目标角变化速度。
+      max_target_roll_deg: 5.0
+      target_slew_rate_deg_s: 20.0
+      rc_deadband: 0.08
+
+      # 只改变遥控器 right_x 的方向。
+      rc_sign: 1.0
+      # 只改变 Roll 控制器左右腿修正方向。修正越修越歪时改为 -1.0。
+      output_sign: 1.0
+
+      angle_filter_hz: 15.0
+      rate_filter_hz: 10.0
 
     auto_trim:
       enable: false

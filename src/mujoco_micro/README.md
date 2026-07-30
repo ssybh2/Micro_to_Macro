@@ -56,3 +56,7 @@ ros2 launch mujoco_micro mujoco_micro.launch.py \
 - Launch: `launch/mujoco_micro.launch.py`
 - Parameters: `config/mujoco_micro.yaml`
 - Debug topic: `/vmc/debug`
+
+## Roll extension
+
+The workspace-level `ROLL_CONTROL_README_CN.md` documents the additive right_x Roll controller. Existing `/vmc/debug` indices 0-50 are preserved; Roll values are appended at indices 51-59.

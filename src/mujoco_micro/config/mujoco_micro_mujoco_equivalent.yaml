@@ -5,7 +5,7 @@ mujoco_micro:
     control:
       profile_name: "mujoco_equivalent_signs"
       period_s: 0.003
-      dry_run: false
+      dry_run: true
       joint_control_enable: true
       balance_control_enable: true
     topics:
@@ -29,7 +29,7 @@ mujoco_micro:
     vmc: {total_supported_mass_kg: 2.8, left_load_fraction: 0.5, right_load_fraction: 0.5, kx_n_per_m: 10.0, ky_n_per_m: 60.0, dx_ns_per_m: 10.0, dy_ns_per_m: 10.0, gravity_compensation: true, horizontal_pitch_gravity_compensation: false, joint_torque_limit_nm: 1.0}
     joint_state: {velocity_filter_hz: 25.0}
     joint_mit: {kp: 7.0, kd: 0.28, hard_torque_limit_nm: 1.5, motor_position_limit_rad: 12.5, max_arm_joint_error_rad: 0.70, max_runtime_joint_error_rad: 1.20}
-    leg_positioning: {balance_wait_for_leg_ready: true, ready_joint_error_rad: 0.10, ready_joint_velocity_rad_s: 0.30, ready_dwell_s: 0.30}
+    leg_positioning: {balance_wait_for_leg_ready: false, ready_joint_error_rad: 0.10, ready_joint_velocity_rad_s: 0.30, ready_dwell_s: 0.30}
     joint_calibration:
       left_a: {motor_zero_rad: -0.340847969, joint_zero_rad: 3.504545690, motor_sign: -1.0, ratio: 1.0, torque_sign: -1.0}
       left_b: {motor_zero_rad: -0.629243851, joint_zero_rad: 0.899913073, motor_sign: -1.0, ratio: 1.0, torque_sign: -1.0}

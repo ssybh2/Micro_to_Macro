@@ -51,6 +51,7 @@ struct RcSample
   bool online{false};
   std::uint8_t right_switch{0};
   double right_y{0.0};
+  double right_x{0.0};
   double left_x{0.0};
   SteadyTime received{};
   bool valid{false};
@@ -87,6 +88,19 @@ struct Snapshot
   ImuSample imu{};
   RcSample rc{};
   std::array<MotorSample, kMotorCount> motors{};
+};
+
+struct RollControlOutput
+{
+  double roll_filtered_rad{0.0};
+  double roll_rate_filtered_rad_s{0.0};
+  double target_roll_rad{0.0};
+  double target_roll_command_rad{0.0};
+  double error_rad{0.0};
+  // Signed total wheel-centre height difference: left_target_y - right_target_y.
+  double leg_difference_m{0.0};
+  double left_target_y_m{0.0};
+  double right_target_y_m{0.0};
 };
 
 class JointVelocityEstimator
@@ -141,6 +155,8 @@ public:
     for (auto & estimator : joint_velocity_estimators_) {
       estimator.configure(joint_velocity_filter_hz_, control_period_s_);
     }
+    roll_filter_.configure(roll_angle_filter_hz_, control_period_s_);
+    roll_rate_filter_.configure(roll_rate_filter_hz_, control_period_s_);
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
@@ -161,6 +177,7 @@ public:
         rc_.online = msg->online != 0U;
         rc_.right_switch = msg->right_switch;
         rc_.right_y = msg->right_y;
+        rc_.right_x = msg->right_x;
         rc_.left_x = msg->left_x;
         rc_.received = std::chrono::steady_clock::now();
         rc_.valid = true;
@@ -221,6 +238,11 @@ public:
       get_logger(),
       "Configured equivalent COM-to-wheel length=%.4f m (model parameters are used for gain design)",
       equivalent_pendulum_length);
+    RCLCPP_INFO(
+      get_logger(),
+      "Roll control=%s RC=right_x max_target=%.2fdeg max_leg_difference=%.1fmm",
+      roll_control_enable_ ? "enabled" : "disabled",
+      roll_max_target_rad_ * 180.0 / kPi, 1000.0 * roll_max_leg_difference_m_);
     RCLCPP_WARN(
       get_logger(),
       "Initial safety state is DISARMED. RC right switch: calibrate=%d, arm=%d, disable=%d",
@@ -315,9 +337,13 @@ private:
 
     imu_pitch_axis_ = parameter<std::string>("imu.pitch_axis", "pitch");
     imu_pitch_rate_axis_ = parameter<std::string>("imu.pitch_rate_axis", "y");
+    imu_roll_axis_ = parameter<std::string>("imu.roll_axis", "roll");
+    imu_roll_rate_axis_ = parameter<std::string>("imu.roll_rate_axis", "x");
     imu_yaw_rate_axis_ = parameter<std::string>("imu.yaw_rate_axis", "z");
     imu_pitch_sign_ = parameter<double>("imu.pitch_sign", 1.0);
     imu_pitch_rate_sign_ = parameter<double>("imu.pitch_rate_sign", 1.0);
+    imu_roll_sign_ = parameter<double>("imu.roll_sign", 1.0);
+    imu_roll_rate_sign_ = parameter<double>("imu.roll_rate_sign", 1.0);
     imu_yaw_rate_sign_ = parameter<double>("imu.yaw_rate_sign", 1.0);
 
     require_rc_ = parameter<bool>("safety.require_rc", true);
@@ -327,6 +353,10 @@ private:
     arm_max_tilt_rad_ = parameter<double>("safety.arm_max_tilt_deg", 10.0) * kPi / 180.0;
     arm_max_pitch_rate_rad_s_ = parameter<double>("safety.arm_max_pitch_rate_rad_s", 0.30);
     fall_cutoff_rad_ = parameter<double>("safety.fall_cutoff_deg", 25.0) * kPi / 180.0;
+    arm_max_roll_rad_ = parameter<double>("safety.arm_max_roll_deg", 10.0) * kPi / 180.0;
+    arm_max_roll_rate_rad_s_ = parameter<double>("safety.arm_max_roll_rate_rad_s", 0.40);
+    fall_cutoff_roll_rad_ =
+      parameter<double>("safety.fall_cutoff_roll_deg", 25.0) * kPi / 180.0;
     calibrate_switch_value_ = parameter<int>("safety.calibrate_switch_value", 1);
     arm_switch_value_ = parameter<int>("safety.arm_switch_value", 3);
     disable_switch_value_ = parameter<int>("safety.disable_switch_value", 2);
@@ -375,6 +405,25 @@ private:
     balance_config_.yaw_torque_limit_each_nm = parameter<double>("yaw.torque_limit_each_nm", 0.025);
     balance_config_.yaw_torque_slew_rate_nm_s = parameter<double>("yaw.torque_slew_nm_s", 0.50);
     balance_config_.yaw_output_sign = parameter<double>("yaw.output_sign", 1.0);
+
+    roll_control_enable_ = parameter<bool>("roll.enable", false);
+    roll_trim_rad_ = parameter<double>("roll.trim_deg", 0.0) * kPi / 180.0;
+    roll_kp_leg_difference_m_per_rad_ =
+      parameter<double>("roll.kp_leg_difference_m_per_rad", 0.080);
+    roll_kd_leg_difference_m_per_rad_s_ =
+      parameter<double>("roll.kd_leg_difference_m_per_rad_s", 0.008);
+    roll_max_leg_difference_m_ = parameter<double>("roll.max_leg_difference_m", 0.016);
+    roll_leg_difference_slew_rate_mps_ =
+      parameter<double>("roll.leg_difference_slew_rate_mps", 0.040);
+    roll_max_target_rad_ =
+      parameter<double>("roll.max_target_roll_deg", 5.0) * kPi / 180.0;
+    roll_target_slew_rate_rad_s_ =
+      parameter<double>("roll.target_slew_rate_deg_s", 20.0) * kPi / 180.0;
+    roll_rc_deadband_ = parameter<double>("roll.rc_deadband", 0.08);
+    roll_rc_sign_ = parameter<double>("roll.rc_sign", 1.0);
+    roll_output_sign_ = parameter<double>("roll.output_sign", 1.0);
+    roll_angle_filter_hz_ = parameter<double>("roll.angle_filter_hz", 15.0);
+    roll_rate_filter_hz_ = parameter<double>("roll.rate_filter_hz", 10.0);
 
     balance_config_.cascade_attitude_k_pitch = parameter<double>("cascade.attitude_k_pitch", 8.0);
     balance_config_.cascade_attitude_k_pitch_rate = parameter<double>("cascade.attitude_k_pitch_rate", 0.06);
@@ -446,18 +495,34 @@ private:
     if (!(control_period_s_ > 0.0)) {
       throw std::runtime_error("control.period_s must be positive");
     }
-    if (imu_pitch_axis_ != "roll" && imu_pitch_axis_ != "pitch") {
-      throw std::runtime_error("imu.pitch_axis must be roll or pitch");
+    if ((imu_pitch_axis_ != "roll" && imu_pitch_axis_ != "pitch") ||
+      (imu_roll_axis_ != "roll" && imu_roll_axis_ != "pitch"))
+    {
+      throw std::runtime_error("imu pitch/roll axes must be roll or pitch");
     }
-    if ((imu_pitch_rate_axis_ != "x" && imu_pitch_rate_axis_ != "y" && imu_pitch_rate_axis_ != "z") ||
-      (imu_yaw_rate_axis_ != "x" && imu_yaw_rate_axis_ != "y" && imu_yaw_rate_axis_ != "z"))
+    const auto rate_axis_valid = [](const std::string & axis) {
+        return axis == "x" || axis == "y" || axis == "z";
+      };
+    if (!rate_axis_valid(imu_pitch_rate_axis_) || !rate_axis_valid(imu_roll_rate_axis_) ||
+      !rate_axis_valid(imu_yaw_rate_axis_))
     {
       throw std::runtime_error("IMU rate axis must be x, y, or z");
     }
     if (!sign_is_valid(imu_pitch_sign_) || !sign_is_valid(imu_pitch_rate_sign_) ||
-      !sign_is_valid(imu_yaw_rate_sign_))
+      !sign_is_valid(imu_roll_sign_) || !sign_is_valid(imu_roll_rate_sign_) ||
+      !sign_is_valid(imu_yaw_rate_sign_) || !sign_is_valid(roll_rc_sign_) ||
+      !sign_is_valid(roll_output_sign_))
     {
-      throw std::runtime_error("IMU signs must be exactly +1 or -1");
+      throw std::runtime_error("IMU/roll signs must be exactly +1 or -1");
+    }
+    if (roll_kp_leg_difference_m_per_rad_ < 0.0 ||
+      roll_kd_leg_difference_m_per_rad_s_ < 0.0 ||
+      roll_max_leg_difference_m_ < 0.0 || roll_leg_difference_slew_rate_mps_ < 0.0 ||
+      roll_max_target_rad_ < 0.0 || roll_target_slew_rate_rad_s_ < 0.0 ||
+      roll_rc_deadband_ < 0.0 || roll_rc_deadband_ >= 1.0 ||
+      roll_angle_filter_hz_ < 0.0 || roll_rate_filter_hz_ < 0.0)
+    {
+      throw std::runtime_error("invalid roll controller gain, limit, filter, or deadband");
     }
     for (std::size_t i : {kLeftJointA, kLeftJointB, kRightJointA, kRightJointB}) {
       const auto & c = calibrations_[i];
@@ -528,7 +593,9 @@ private:
     return imu.angular_z;
   }
 
-  bool attitude(const ImuSample & imu, double & pitch, double & pitch_rate, double & yaw_rate) const
+  bool attitude(
+    const ImuSample & imu, double & roll, double & roll_rate,
+    double & pitch, double & pitch_rate, double & yaw_rate) const
   {
     if (!calibrated_) {
       return false;
@@ -538,11 +605,15 @@ private:
       return false;
     }
     const Quaternion relative = relative_quaternion(imu_zero_, current);
+    roll = imu_roll_sign_ * (
+      imu_roll_axis_ == "pitch" ? quaternion_pitch(relative) : quaternion_roll(relative));
     pitch = imu_pitch_sign_ * (
       imu_pitch_axis_ == "roll" ? quaternion_roll(relative) : quaternion_pitch(relative));
+    roll_rate = imu_roll_rate_sign_ * axis_rate(imu, imu_roll_rate_axis_);
     pitch_rate = imu_pitch_rate_sign_ * axis_rate(imu, imu_pitch_rate_axis_);
     yaw_rate = imu_yaw_rate_sign_ * axis_rate(imu, imu_yaw_rate_axis_);
-    return std::isfinite(pitch) && std::isfinite(pitch_rate) && std::isfinite(yaw_rate);
+    return std::isfinite(roll) && std::isfinite(roll_rate) &&
+           std::isfinite(pitch) && std::isfinite(pitch_rate) && std::isfinite(yaw_rate);
   }
 
   std::array<double, 4> joint_positions(const Snapshot & s) const
@@ -569,6 +640,7 @@ private:
     arm_transition_required_ = true;
     balance_.calibrate_wheels(
       s.motors[kLeftWheel].position, s.motors[kRightWheel].position);
+    reset_roll_controller(0.0, 0.0);
     const auto q = joint_positions(s);
     for (std::size_t i = 0; i < 4; ++i) {
       joint_velocity_estimators_[i].reset(q[i]);
@@ -597,13 +669,61 @@ private:
     return input;
   }
 
+  void reset_roll_controller(double roll, double roll_rate)
+  {
+    roll_filter_.reset(roll);
+    roll_rate_filter_.reset(roll_rate);
+    roll_target_command_rad_ = 0.0;
+    roll_leg_difference_m_ = 0.0;
+  }
+
+  RollControlOutput update_roll_controller(
+    double roll, double roll_rate, double rc_right_x, double dt, bool active)
+  {
+    RollControlOutput out;
+    out.roll_filtered_rad = roll_filter_.update(roll, dt);
+    out.roll_rate_filtered_rad_s = roll_rate_filter_.update(roll_rate, dt);
+
+    const double shaped = roll_rc_sign_ * shape_unit_stick(rc_right_x, roll_rc_deadband_);
+    const double requested_command =
+      (active && roll_control_enable_) ? shaped * roll_max_target_rad_ : 0.0;
+    const double target_step = roll_target_slew_rate_rad_s_ * dt;
+    roll_target_command_rad_ += clamp_value(
+      requested_command - roll_target_command_rad_, -target_step, target_step);
+
+    out.target_roll_command_rad = roll_target_command_rad_;
+    out.target_roll_rad = roll_trim_rad_ + roll_target_command_rad_;
+    out.error_rad = out.target_roll_rad - out.roll_filtered_rad;
+
+    double requested_difference = 0.0;
+    if (active && roll_control_enable_) {
+      requested_difference = roll_output_sign_ * (
+        roll_kp_leg_difference_m_per_rad_ * out.error_rad -
+        roll_kd_leg_difference_m_per_rad_s_ * out.roll_rate_filtered_rad_s);
+      requested_difference = clamp_value(
+        requested_difference, -roll_max_leg_difference_m_, roll_max_leg_difference_m_);
+    }
+
+    const double difference_step = roll_leg_difference_slew_rate_mps_ * dt;
+    roll_leg_difference_m_ += clamp_value(
+      requested_difference - roll_leg_difference_m_, -difference_step, difference_step);
+    roll_leg_difference_m_ = clamp_value(
+      roll_leg_difference_m_, -roll_max_leg_difference_m_, roll_max_leg_difference_m_);
+
+    out.leg_difference_m = roll_leg_difference_m_;
+    out.left_target_y_m = vmc_config_.target_y_m + 0.5 * roll_leg_difference_m_;
+    out.right_target_y_m = vmc_config_.target_y_m - 0.5 * roll_leg_difference_m_;
+    return out;
+  }
+
   bool solve_target(
-    const std::array<double, 4> & q, IkSolution & left_ik, IkSolution & right_ik) const
+    const std::array<double, 4> & q, double left_target_y_m, double right_target_y_m,
+    IkSolution & left_ik, IkSolution & right_ik) const
   {
     left_ik = kinematics_.inverse(
-      vmc_config_.target_x_m, vmc_config_.target_y_m, q[0], q[1]);
+      vmc_config_.target_x_m, left_target_y_m, q[0], q[1]);
     right_ik = kinematics_.inverse(
-      vmc_config_.target_x_m, vmc_config_.target_y_m, q[2], q[3]);
+      vmc_config_.target_x_m, right_target_y_m, q[2], q[3]);
     return left_ik.valid && right_ik.valid;
   }
 
@@ -613,24 +733,33 @@ private:
       RCLCPP_WARN(get_logger(), "Arm rejected: calibrate first");
       return false;
     }
+    double roll = 0.0;
+    double roll_rate = 0.0;
     double pitch = 0.0;
     double pitch_rate = 0.0;
     double yaw_rate = 0.0;
-    if (!attitude(s.imu, pitch, pitch_rate, yaw_rate)) {
+    if (!attitude(s.imu, roll, roll_rate, pitch, pitch_rate, yaw_rate)) {
       RCLCPP_WARN(get_logger(), "Arm rejected: invalid attitude");
       return false;
     }
-    if (std::abs(pitch) > arm_max_tilt_rad_ || std::abs(pitch_rate) > arm_max_pitch_rate_rad_s_) {
+    if (std::abs(pitch) > arm_max_tilt_rad_ ||
+      std::abs(pitch_rate) > arm_max_pitch_rate_rad_s_ ||
+      std::abs(roll) > arm_max_roll_rad_ ||
+      std::abs(roll_rate) > arm_max_roll_rate_rad_s_)
+    {
       RCLCPP_WARN(
-        get_logger(), "Arm rejected: pitch=%+.2f deg, pitch_rate=%+.3f rad/s",
-        pitch * 180.0 / kPi, pitch_rate);
+        get_logger(),
+        "Arm rejected: pitch=%+.2fdeg pitch_rate=%+.3frad/s roll=%+.2fdeg roll_rate=%+.3frad/s",
+        pitch * 180.0 / kPi, pitch_rate, roll * 180.0 / kPi, roll_rate);
       return false;
     }
 
     const auto q = joint_positions(s);
     IkSolution left_ik;
     IkSolution right_ik;
-    if (!solve_target(q, left_ik, right_ik)) {
+    if (!solve_target(
+        q, vmc_config_.target_y_m, vmc_config_.target_y_m, left_ik, right_ik))
+    {
       RCLCPP_WARN(get_logger(), "Arm rejected: target wheel centre is unreachable");
       return false;
     }
@@ -645,6 +774,7 @@ private:
     // MIT position loops, even when the leg is far from the target wheel centre.
     // Wheel balance is armed separately after the leg reaches the target.
     balance_.reset();
+    reset_roll_controller(roll, roll_rate);
     balance_armed_ = false;
     leg_ready_accumulated_s_ = 0.0;
     if (!balance_wait_for_leg_ready_ && balance_control_enable_) {
@@ -673,6 +803,7 @@ private:
     leg_ready_accumulated_s_ = 0.0;
     arm_transition_required_ = true;
     balance_.reset();
+    reset_roll_controller(0.0, 0.0);
     publish_all_disabled();
   }
 
@@ -706,7 +837,8 @@ private:
     const std::array<double, 4> & q_des, const FiveBarState & left_state,
     const FiveBarState & right_state, const VmcOutput & left_vmc,
     const VmcOutput & right_vmc, const BalanceDebug & balance_debug,
-    const IkSolution & left_ik, const IkSolution & right_ik)
+    const IkSolution & left_ik, const IkSolution & right_ik,
+    const RollControlOutput & roll_output, double rc_right_x)
   {
     std_msgs::msg::Float64MultiArray message;
     message.data = {
@@ -726,7 +858,12 @@ private:
       balance_debug.left_motor_command_nm, balance_debug.right_motor_command_nm,
       balance_debug.yaw_differential_each_nm, balance_debug.auto_trim_rad,
       left_state.jacobian_det, right_state.jacobian_det,
-      left_ik.reconstruction_error_m, right_ik.reconstruction_error_m};
+      left_ik.reconstruction_error_m, right_ik.reconstruction_error_m,
+      // Roll values are appended so every pre-existing debug index remains unchanged.
+      roll_output.roll_filtered_rad, roll_output.roll_rate_filtered_rad_s,
+      roll_output.target_roll_rad, roll_output.target_roll_command_rad,
+      roll_output.error_rad, roll_output.leg_difference_m,
+      roll_output.left_target_y_m, roll_output.right_target_y_m, rc_right_x};
     debug_pub_->publish(message);
   }
 
@@ -776,15 +913,21 @@ private:
       return;
     }
 
+    double roll = 0.0;
+    double roll_rate = 0.0;
     double pitch = 0.0;
     double pitch_rate = 0.0;
     double yaw_rate = 0.0;
-    if (!attitude(s.imu, pitch, pitch_rate, yaw_rate)) {
+    if (!attitude(s.imu, roll, roll_rate, pitch, pitch_rate, yaw_rate)) {
       disarm("invalid attitude");
       return;
     }
     if (std::abs(pitch) > fall_cutoff_rad_) {
-      disarm("fall angle exceeded");
+      disarm("pitch fall angle exceeded");
+      return;
+    }
+    if (std::abs(roll) > fall_cutoff_roll_rad_) {
+      disarm("roll fall angle exceeded");
       return;
     }
 
@@ -800,10 +943,15 @@ private:
       return;
     }
 
+    const RollControlOutput roll_output = update_roll_controller(
+      roll, roll_rate, s.rc.right_x, dt, balance_armed_ && balance_control_enable_);
+
     IkSolution left_ik;
     IkSolution right_ik;
-    if (!solve_target(q, left_ik, right_ik)) {
-      disarm("five-bar target IK invalid");
+    if (!solve_target(
+        q, roll_output.left_target_y_m, roll_output.right_target_y_m, left_ik, right_ik))
+    {
+      disarm("roll-adjusted five-bar target IK invalid");
       return;
     }
     const std::array<double, 4> q_des{left_ik.alpha, left_ik.beta, right_ik.alpha, right_ik.beta};
@@ -820,14 +968,19 @@ private:
       return;
     }
 
+    VmcConfig left_vmc_config = vmc_config_;
+    VmcConfig right_vmc_config = vmc_config_;
+    left_vmc_config.target_y_m = roll_output.left_target_y_m;
+    right_vmc_config.target_y_m = roll_output.right_target_y_m;
+
     const VmcOutput left_vmc = calculate_vmc(
       left_state, pitch,
       vmc_config_.total_supported_mass_kg * vmc_config_.left_load_fraction,
-      vmc_config_);
+      left_vmc_config);
     const VmcOutput right_vmc = calculate_vmc(
       right_state, pitch,
       vmc_config_.total_supported_mass_kg * vmc_config_.right_load_fraction,
-      vmc_config_);
+      right_vmc_config);
 
     const bool command_enable = !dry_run_;
     const std::array<double, 4> p_des_motor{
@@ -885,15 +1038,19 @@ private:
 
     publish_debug(
       dt, pitch, pitch_rate, q, q_des, left_state, right_state, left_vmc,
-      right_vmc, balance_output.debug, left_ik, right_ik);
+      right_vmc, balance_output.debug, left_ik, right_ik, roll_output, s.rc.right_x);
 
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 200,
-      "state=%s pitch=%+.2fdeg max_qerr=%.3frad x=%.4fm v=%+.4fm/s "
-      "B_L=(%.1f,%.1f)mm B_R=(%.1f,%.1f)mm wheel_tau=(%+.3f,%+.3f)Nm",
+      "state=%s pitch=%+.2fdeg roll=%+.2f/%+.2fdeg dLeg=%+.1fmm max_qerr=%.3frad "
+      "x=%.4fm v=%+.4fm/s B_L=(%.1f,%.1f)mm B_R=(%.1f,%.1f)mm "
+      "wheel_tau=(%+.3f,%+.3f)Nm",
       balance_armed_ ? "BALANCE" : "LEG_POSITIONING",
-      pitch * 180.0 / kPi, max_joint_error, balance_output.debug.position_m,
-      balance_output.debug.velocity_mps, left_state.x * 1000.0, left_state.y * 1000.0,
+      pitch * 180.0 / kPi, roll_output.roll_filtered_rad * 180.0 / kPi,
+      roll_output.target_roll_rad * 180.0 / kPi,
+      roll_output.leg_difference_m * 1000.0, max_joint_error,
+      balance_output.debug.position_m, balance_output.debug.velocity_mps,
+      left_state.x * 1000.0, left_state.y * 1000.0,
       right_state.x * 1000.0, right_state.y * 1000.0,
       balance_output.left_motor_torque_nm, balance_output.right_motor_torque_nm);
   }
@@ -944,10 +1101,34 @@ private:
 
   std::string imu_pitch_axis_{"pitch"};
   std::string imu_pitch_rate_axis_{"y"};
+  std::string imu_roll_axis_{"roll"};
+  std::string imu_roll_rate_axis_{"x"};
   std::string imu_yaw_rate_axis_{"z"};
   double imu_pitch_sign_{1.0};
   double imu_pitch_rate_sign_{1.0};
+  double imu_roll_sign_{1.0};
+  double imu_roll_rate_sign_{1.0};
   double imu_yaw_rate_sign_{1.0};
+
+  // Independent roll controller. It changes only left/right leg target Y and does not
+  // alter the existing pitch, forward-velocity, or yaw wheel-torque controller.
+  bool roll_control_enable_{false};
+  double roll_trim_rad_{0.0};
+  double roll_kp_leg_difference_m_per_rad_{0.080};
+  double roll_kd_leg_difference_m_per_rad_s_{0.008};
+  double roll_max_leg_difference_m_{0.016};
+  double roll_leg_difference_slew_rate_mps_{0.040};
+  double roll_max_target_rad_{5.0 * kPi / 180.0};
+  double roll_target_slew_rate_rad_s_{20.0 * kPi / 180.0};
+  double roll_rc_deadband_{0.08};
+  double roll_rc_sign_{1.0};
+  double roll_output_sign_{1.0};
+  double roll_angle_filter_hz_{15.0};
+  double roll_rate_filter_hz_{10.0};
+  FirstOrderLowPass roll_filter_{};
+  FirstOrderLowPass roll_rate_filter_{};
+  double roll_target_command_rad_{0.0};
+  double roll_leg_difference_m_{0.0};
 
   bool require_rc_{true};
   double imu_timeout_s_{0.05};
@@ -956,6 +1137,9 @@ private:
   double arm_max_tilt_rad_{10.0 * kPi / 180.0};
   double arm_max_pitch_rate_rad_s_{0.30};
   double fall_cutoff_rad_{25.0 * kPi / 180.0};
+  double arm_max_roll_rad_{10.0 * kPi / 180.0};
+  double arm_max_roll_rate_rad_s_{0.40};
+  double fall_cutoff_roll_rad_{25.0 * kPi / 180.0};
   int calibrate_switch_value_{1};
   int arm_switch_value_{3};
   int disable_switch_value_{2};

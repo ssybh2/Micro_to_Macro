@@ -21,8 +21,8 @@ class DebugMonitor(Node):
 
     def callback(self, msg: Float64MultiArray) -> None:
         d = msg.data
-        if len(d) < 49:
-            self.get_logger().warning(f'Expected at least 49 values, got {len(d)}')
+        if len(d) < 60:
+            self.get_logger().warning(f'Expected at least 60 values, got {len(d)}')
             return
         now_ns = self.get_clock().now().nanoseconds
         if now_ns - self.last_print_ns < int(self.period_s * 1e9):
@@ -31,6 +31,8 @@ class DebugMonitor(Node):
         state = 'BALANCE' if d[3] > 0.5 else ('ARMED' if d[0] > 0.5 else 'DISARMED')
         self.get_logger().info(
             f'state={state:8s} pitch={math.degrees(d[4]):+6.2f}deg '
+            f'roll={math.degrees(d[51]):+6.2f}/{math.degrees(d[53]):+6.2f}deg '
+            f'dLeg={1000*d[56]:+6.1f}mm right_x={d[59]:+.2f} '
             f'qerr_data=see raw x={d[33]:+.4f}m v={d[34]:+.4f}m/s '
             f'B_L=({1000*d[7]:.1f},{1000*d[8]:.1f})mm '
             f'B_R=({1000*d[11]:.1f},{1000*d[12]:.1f})mm '
