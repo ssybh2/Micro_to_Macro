@@ -1,0 +1,1 @@
+/home/uonaim/mujoco_micro/src/mujoco_micro/scripts/check_topics.sh

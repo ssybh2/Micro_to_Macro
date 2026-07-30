@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/mujoco_micro_core_self_check.dir/tools/core_self_check.cpp.o -o mujoco_micro_core_self_check  libmujoco_micro_core.a 

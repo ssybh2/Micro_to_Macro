@@ -1,0 +1,2 @@
+/usr/bin/ar qc libmujoco_micro_core.a CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o
+/usr/bin/ranlib libmujoco_micro_core.a

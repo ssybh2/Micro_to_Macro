@@ -1,0 +1,220 @@
+mujoco_micro_node:
+  ros__parameters:
+    control:
+      profile_name: "mujoco_validated_hardware"
+      period_s: 0.003
+      # 安全默认：先只计算并发布 /vmc/debug，六个电机均 enable=0。
+      dry_run: false
+      joint_control_enable: true
+      balance_control_enable: true
+
+    # 完全沿用最初 vmc_micro_ws 中的 EtherCAT 话题。
+    topics:
+      imu_read: "/ecat/sn1966149/app1/read"
+      rc_read: "/ecat/sn2228252/app1/read"
+
+      left_joint_a_read: "/ecat/sn2228252/app2/read"
+      left_joint_a_write: "/ecat/sn2228252/app2/write"
+      left_joint_b_read: "/ecat/sn2228252/app3/read"
+      left_joint_b_write: "/ecat/sn2228252/app3/write"
+      left_wheel_read: "/ecat/sn2228252/app4/read"
+      left_wheel_write: "/ecat/sn2228252/app4/write"
+
+      right_joint_a_read: "/ecat/sn2228252/app5/read"
+      right_joint_a_write: "/ecat/sn2228252/app5/write"
+      right_joint_b_read: "/ecat/sn2228252/app6/read"
+      right_joint_b_write: "/ecat/sn2228252/app6/write"
+      right_wheel_read: "/ecat/sn2228252/app7/read"
+      right_wheel_write: "/ecat/sn2228252/app7/write"
+
+      debug: "/vmc/debug"
+
+    five_bar:
+      l1_m: 0.0804
+      l2_m: 0.1200
+      l3_m: 0.1200
+      l4_m: 0.0804
+      l5_m: 0.0700
+      singularity_epsilon: 1.0e-5
+      reachability_epsilon: 1.0e-7
+
+    # MuJoCo 已验证的长腿目标：B=(35,120) mm。
+    leg:
+      target_x_m: 0.035
+      target_y_m: 0.120
+
+    vmc:
+      total_supported_mass_kg: 2.8
+      left_load_fraction: 0.5
+      right_load_fraction: 0.5
+      kx_n_per_m: 10.0
+      ky_n_per_m: 60.0
+      dx_ns_per_m: 10.0
+      dy_ns_per_m: 10.0
+      gravity_compensation: true
+      horizontal_pitch_gravity_compensation: false
+      joint_torque_limit_nm: 1.0
+
+    joint_state:
+      velocity_filter_hz: 25.0
+
+    # 与 MuJoCo 中的 MIT 等效参数一致；实机由电机固件执行位置/速度项。
+    joint_mit:
+      kp: 7.0
+      kd: 0.28
+      hard_torque_limit_nm: 1.5
+      motor_position_limit_rad: 12.5
+      max_arm_joint_error_rad: 0.70
+      max_runtime_joint_error_rad: 1.20
+
+    # MuJoCo 验证时腿部和轮毂平衡同时启动，避免定位腿期间机身先倒下。
+    leg_positioning:
+      balance_wait_for_leg_ready: true
+      ready_joint_error_rad: 0.10
+      ready_joint_velocity_rad_s: 0.30
+      ready_dwell_s: 0.30
+
+    # 实机标定值沿用最初 ROS2 包；不要用 MuJoCo 的 joint.angle_sign 替换这些值。
+    joint_calibration:
+      left_a:
+        motor_zero_rad: -0.340847969
+        joint_zero_rad: 3.504545690
+        motor_sign: -1.0
+        ratio: 1.0
+        torque_sign: -1.0
+      left_b:
+        motor_zero_rad: -0.629243851
+        joint_zero_rad: 0.899913073
+        motor_sign: -1.0
+        ratio: 1.0
+        torque_sign: -1.0
+      right_a:
+        motor_zero_rad: -0.912680626
+        joint_zero_rad: 2.241679670
+        motor_sign: 1.0
+        ratio: 1.0
+        torque_sign: 1.0
+      right_b:
+        motor_zero_rad: -0.602540970
+        joint_zero_rad: -0.362952948
+        motor_sign: 1.0
+        ratio: 1.0
+        torque_sign: 1.0
+
+    imu:
+      pitch_axis: "pitch"          # 若实机 IMU roll 对应车身 pitch，改为 roll
+      pitch_rate_axis: "y"         # roll 对应时通常改为 x
+      yaw_rate_axis: "z"
+      pitch_sign: 1.0
+      pitch_rate_sign: 1.0
+      yaw_rate_sign: 1.0
+
+    safety:
+      require_rc: true
+      imu_timeout_s: 0.05
+      motor_timeout_s: 0.05
+      rc_timeout_s: 0.20
+      arm_max_tilt_deg: 10.0
+      arm_max_pitch_rate_rad_s: 0.30
+      fall_cutoff_deg: 35.0
+      calibrate_switch_value: 1
+      arm_switch_value: 3
+      disable_switch_value: 2
+
+    # 下面是实机编码器/电机安装方向，沿用最初 ROS2 包。
+    balance:
+      mode: "cascade"
+      wheel_radius_m: 0.030
+      motor_position_wrap_half_range: 3.141592653589793
+      left_encoder_sign: 1.0
+      right_encoder_sign: -1.0
+      pitch_position_compensation_sign: 1.0
+      pitch_rate_compensation_sign: 1.0
+      output_gain_sign: -1.0
+      left_motor_sign: -1.0
+      right_motor_sign: 1.0
+      torque_limit_each_nm: 0.20
+      hard_torque_limit_each_nm: 0.45
+      pitch_filter_hz: 40.0
+      pitch_rate_filter_hz: 25.0
+      wheel_velocity_filter_hz: 30.0
+      position_velocity_filter_hz: 12.0
+      outer_velocity_filter_hz: 8.0
+      velocity_blend: 0.0
+
+    rc:
+      # 首次上机默认关闭前进指令；站稳后可通过 launch 参数开启。
+      velocity_command_enable: true
+      max_target_velocity_mps: 0.20
+      forward_sign: 1.0
+      deadband: 0.08
+      velocity_slew_rate_mps2: 0.60
+
+    # MuJoCo 最终验证值的“实机符号等效迁移”：
+    # 仿真使用 Kpos=-0.12、Kvel=-0.035、position_to_pitch_sign=+1；
+    # 实机保持正增益并使用原硬件 position_to_pitch_sign=-1，乘积完全等效。
+    cascade:
+      attitude_k_pitch: 2.2
+      attitude_k_pitch_rate: 0.1
+      position_kp_rad_per_m: 0.2 #0.12
+      velocity_kd_rad_per_mps: 0.15 #0.035
+      position_ki_rad_per_m_s: 0.0
+      integral_enable: false
+      integral_limit_m_s: 0.20
+      position_to_pitch_sign: -1.0
+      pitch_limit_deg: 8.0
+      pitch_slew_rate_deg_s: 30.0
+      position_error_limit_m: 0.50
+      velocity_error_limit_mps: 0.80
+      arm_bumpless: true
+      pitch_trim_deg: 1.0
+
+    yaw:
+      enable: true
+      max_target_rate_rad_s: 0.80
+      rc_sign: -1.0
+      rate_slew_rad_s2: 3.0
+      kp_each_nm_per_rad_s: 0.033
+      kd_each_nm_per_rad_s2: 0.0
+      deadband_rad_s: 0.02
+      rate_filter_hz: 15.0
+      accel_filter_hz: 8.0
+      torque_limit_each_nm: 0.025
+      torque_slew_nm_s: 0.50
+      output_sign: 1.0
+
+    auto_trim:
+      enable: false
+      gain_rad_per_m_s: 0.020
+      limit_deg: 4.0
+      position_deadband_m: 0.05
+      velocity_limit_mps: 0.25
+      pitch_rate_limit_rad_s: 0.20
+      safe_pitch_deg: 6.0
+      max_position_error_m: 0.70
+      dwell_s: 0.25
+      max_rate_deg_s: 0.10
+
+    stiction:
+      enable: false
+      velocity_limit_mps: 0.015
+      pitch_rate_limit_rad_s: 0.08
+      position_error_m: 0.008
+      command_min_total_nm: 0.002
+      compensation_each_nm: 0.005
+
+    lqr:
+      gain_scale: 1.0
+      k_pitch: -2.0
+      k_pitch_rate: -0.10
+      k_position: -0.55
+      k_velocity: -0.13
+
+    model:
+      body_mass_kg: 2.54
+      body_pitch_inertia_kgm2: 0.0
+      body_com_x_m: 0.035
+      body_com_y_m: -0.065
+      wheel_mass_each_kg: 0.13
+      wheel_inertia_each_kgm2: 0.0
+      track_width_m: 0.20

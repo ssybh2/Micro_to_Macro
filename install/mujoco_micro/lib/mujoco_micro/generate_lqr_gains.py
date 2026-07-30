@@ -1,0 +1,1 @@
+/home/uonaim/mujoco_micro/src/mujoco_micro/scripts/generate_lqr_gains.py

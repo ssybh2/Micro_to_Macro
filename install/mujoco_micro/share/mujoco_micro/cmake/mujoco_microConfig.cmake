@@ -1,0 +1,1 @@
+/home/uonaim/mujoco_micro/build/mujoco_micro/ament_cmake_core/mujoco_microConfig.cmake

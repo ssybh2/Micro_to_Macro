@@ -1,0 +1,8 @@
+source;share/mujoco_micro/hook/cmake_prefix_path.ps1
+source;share/mujoco_micro/hook/cmake_prefix_path.dsv
+source;share/mujoco_micro/hook/cmake_prefix_path.sh
+source;share/mujoco_micro/local_setup.bash
+source;share/mujoco_micro/local_setup.dsv
+source;share/mujoco_micro/local_setup.ps1
+source;share/mujoco_micro/local_setup.sh
+source;share/mujoco_micro/local_setup.zsh
