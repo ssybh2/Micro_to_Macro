@@ -168,10 +168,10 @@ mujoco_micro_node:
 
     yaw:
       enable: true
-      max_target_rate_rad_s: 0.80
+      max_target_rate_rad_s: 3.0
       rc_sign: -1.0
-      rate_slew_rad_s2: 3.0
-      kp_each_nm_per_rad_s: 0.033
+      rate_slew_rad_s2: 10.0
+      kp_each_nm_per_rad_s: 0.1
       kd_each_nm_per_rad_s2: 0.0
       deadband_rad_s: 0.02
       rate_filter_hz: 15.0
@@ -187,15 +187,15 @@ mujoco_micro_node:
       trim_deg: 0.0
 
       # Roll PD 输出“左右两腿轮心 Y 目标的总差值”。
-      kp_leg_difference_m_per_rad: 0.080
+      kp_leg_difference_m_per_rad: 0.9
       kd_leg_difference_m_per_rad_s: 0.008
 
       # |left_target_y - right_target_y| 的最大值；0.016 表示总差最多 16 mm，单腿各偏 8 mm。
       max_leg_difference_m: 0.10
-      leg_difference_slew_rate_mps: 0.040
+      leg_difference_slew_rate_mps: 0.10
 
       # right_x 满杆对应的最大 Roll 目标角和目标角变化速度。
-      max_target_roll_deg: 5.0
+      max_target_roll_deg: 10.0
       target_slew_rate_deg_s: 20.0
       rc_deadband: 0.08
 
