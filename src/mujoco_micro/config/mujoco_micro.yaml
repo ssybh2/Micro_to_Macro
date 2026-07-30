@@ -174,7 +174,7 @@ mujoco_micro_node:
       max_target_rate_rad_s: 0.80
       rc_sign: -1.0
       rate_slew_rad_s2: 3.0
-      kp_each_nm_per_rad_s: 0.033
+      kp_each_nm_per_rad_s: 0.1
       kd_each_nm_per_rad_s2: 0.0
       deadband_rad_s: 0.02
       rate_filter_hz: 15.0
