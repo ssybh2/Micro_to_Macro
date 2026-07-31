@@ -44,6 +44,11 @@ struct ImuSample
   double angular_x{0.0};
   double angular_y{0.0};
   double angular_z{0.0};
+  double linear_x{0.0};
+  double linear_y{0.0};
+  double linear_z{0.0};
+  bool orientation_available{false};
+  bool linear_acceleration_available{false};
   SteadyTime received{};
   bool valid{false};
 };
@@ -180,6 +185,9 @@ public:
     }
     roll_filter_.configure(roll_angle_filter_hz_, control_period_s_);
     roll_rate_filter_.configure(roll_rate_filter_hz_, control_period_s_);
+    gravity_x_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
+    gravity_y_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
+    gravity_z_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
     if (policy_enable_) {
       if (policy_model_path_.empty()) {
         policy_model_path_ = ament_index_cpp::get_package_share_directory("mujoco_micro") +
@@ -194,9 +202,14 @@ public:
         std::lock_guard<std::mutex> lock(data_mutex_);
         imu_.orientation = {
           msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z};
+        imu_.orientation_available = msg->orientation_covariance[0] != -1.0;
         imu_.angular_x = msg->angular_velocity.x;
         imu_.angular_y = msg->angular_velocity.y;
         imu_.angular_z = msg->angular_velocity.z;
+        imu_.linear_x = msg->linear_acceleration.x;
+        imu_.linear_y = msg->linear_acceleration.y;
+        imu_.linear_z = msg->linear_acceleration.z;
+        imu_.linear_acceleration_available = msg->linear_acceleration_covariance[0] != -1.0;
         imu_.received = std::chrono::steady_clock::now();
         imu_.valid = true;
       });
@@ -280,10 +293,23 @@ public:
       1000.0 * height_min_m_, 1000.0 * height_max_m_, 1000.0 * height_center_m_,
       1000.0 * height_target_slew_rate_mps_, policy_enable_ ? "enabled: " : "disabled",
       policy_enable_ ? policy_model_path_.c_str() : "");
-    RCLCPP_WARN(
+    RCLCPP_INFO(
       get_logger(),
-      "Initial safety state is DISARMED. RC right switch: calibrate=%d, arm=%d, disable=%d",
-      calibrate_switch_value_, arm_switch_value_, disable_switch_value_);
+      "Attitude reference=%s gravity_source=%s mount_trim=(roll=%+.2f,pitch=%+.2f)deg",
+      imu_reference_mode_.c_str(), imu_gravity_source_.c_str(),
+      imu_mount_roll_rad_ * 180.0 / kPi, imu_mount_pitch_rad_ * 180.0 / kPi);
+    if (imu_reference_mode_ == "gravity") {
+      RCLCPP_WARN(
+        get_logger(),
+        "Initial state DISARMED. RC switch: optional motion-origin reset=%d, arm=%d, disable=%d; "
+        "attitude zero comes from gravity",
+        calibrate_switch_value_, arm_switch_value_, disable_switch_value_);
+    } else {
+      RCLCPP_WARN(
+        get_logger(),
+        "Initial state DISARMED. RC switch: relative-attitude calibrate=%d, arm=%d, disable=%d",
+        calibrate_switch_value_, arm_switch_value_, disable_switch_value_);
+    }
   }
 
   ~MujocoMicroNode() override
@@ -390,6 +416,16 @@ private:
     imu_roll_sign_ = parameter<double>("imu.roll_sign", 1.0);
     imu_roll_rate_sign_ = parameter<double>("imu.roll_rate_sign", 1.0);
     imu_yaw_rate_sign_ = parameter<double>("imu.yaw_rate_sign", 1.0);
+    imu_reference_mode_ = parameter<std::string>("imu.reference_mode", "gravity");
+    imu_gravity_source_ = parameter<std::string>("imu.gravity_source", "orientation");
+    imu_mount_roll_rad_ = parameter<double>("imu.mount_roll_deg", 0.0) * kPi / 180.0;
+    imu_mount_pitch_rad_ = parameter<double>("imu.mount_pitch_deg", 0.0) * kPi / 180.0;
+    imu_gravity_accel_sign_ = parameter<double>("imu.gravity_accel_sign", 1.0);
+    imu_gravity_filter_hz_ = parameter<double>("imu.gravity_filter_hz", 10.0);
+    imu_gravity_norm_min_mps2_ = parameter<double>("imu.gravity_norm_min_mps2", 7.8);
+    imu_gravity_norm_max_mps2_ = parameter<double>("imu.gravity_norm_max_mps2", 11.8);
+    imu_gravity_ready_dwell_s_ = parameter<double>("imu.gravity_ready_dwell_s", 0.20);
+    imu_gravity_timeout_s_ = parameter<double>("imu.gravity_timeout_s", 0.20);
 
     require_rc_ = parameter<bool>("safety.require_rc", true);
     imu_timeout_s_ = parameter<double>("safety.imu_timeout_s", 0.05);
@@ -551,6 +587,12 @@ private:
     {
       throw std::runtime_error("imu pitch/roll axes must be roll or pitch");
     }
+    if (imu_reference_mode_ != "relative" && imu_reference_mode_ != "gravity") {
+      throw std::runtime_error("imu.reference_mode must be relative or gravity");
+    }
+    if (imu_gravity_source_ != "orientation" && imu_gravity_source_ != "accelerometer") {
+      throw std::runtime_error("imu.gravity_source must be orientation or accelerometer");
+    }
     const auto rate_axis_valid = [](const std::string & axis) {
         return axis == "x" || axis == "y" || axis == "z";
       };
@@ -562,9 +604,17 @@ private:
     if (!sign_is_valid(imu_pitch_sign_) || !sign_is_valid(imu_pitch_rate_sign_) ||
       !sign_is_valid(imu_roll_sign_) || !sign_is_valid(imu_roll_rate_sign_) ||
       !sign_is_valid(imu_yaw_rate_sign_) || !sign_is_valid(roll_rc_sign_) ||
-      !sign_is_valid(roll_output_sign_) || !sign_is_valid(height_rc_sign_))
+      !sign_is_valid(roll_output_sign_) || !sign_is_valid(height_rc_sign_) ||
+      !sign_is_valid(imu_gravity_accel_sign_))
     {
       throw std::runtime_error("IMU/roll signs must be exactly +1 or -1");
+    }
+    if (!std::isfinite(imu_mount_roll_rad_) || !std::isfinite(imu_mount_pitch_rad_) ||
+      imu_gravity_filter_hz_ < 0.0 || !(imu_gravity_norm_min_mps2_ > 0.0) ||
+      !(imu_gravity_norm_max_mps2_ > imu_gravity_norm_min_mps2_) ||
+      imu_gravity_ready_dwell_s_ < 0.0 || !(imu_gravity_timeout_s_ > 0.0))
+    {
+      throw std::runtime_error("invalid IMU gravity-reference parameter");
     }
     if (roll_kp_leg_difference_m_per_rad_ < 0.0 ||
       roll_kd_leg_difference_m_per_rad_s_ < 0.0 ||
@@ -657,22 +707,106 @@ private:
     return imu.angular_z;
   }
 
+  bool update_gravity_reference(const ImuSample & imu, double dt)
+  {
+    gravity_accel_norm_mps2_ = std::hypot(
+      imu.linear_x, std::hypot(imu.linear_y, imu.linear_z));
+    if (imu_reference_mode_ != "gravity") {
+      return calibrated_;
+    }
+
+    Vector3 candidate{};
+    bool valid = false;
+    if (imu_gravity_source_ == "orientation" && imu.orientation_available) {
+      Quaternion orientation = imu.orientation;
+      if (normalize_quaternion(orientation)) {
+        candidate = world_up_axis_in_body(orientation);
+        valid = normalize_vector(candidate);
+      }
+    } else if (imu_gravity_source_ == "accelerometer" &&
+      imu.linear_acceleration_available &&
+      std::isfinite(gravity_accel_norm_mps2_) &&
+      gravity_accel_norm_mps2_ >= imu_gravity_norm_min_mps2_ &&
+      gravity_accel_norm_mps2_ <= imu_gravity_norm_max_mps2_)
+    {
+      const double scale = imu_gravity_accel_sign_ / gravity_accel_norm_mps2_;
+      candidate = {scale * imu.linear_x, scale * imu.linear_y, scale * imu.linear_z};
+      if (!gravity_filter_initialized_) {
+        gravity_x_filter_.reset(candidate.x);
+        gravity_y_filter_.reset(candidate.y);
+        gravity_z_filter_.reset(candidate.z);
+        gravity_filter_initialized_ = true;
+      } else {
+        candidate.x = gravity_x_filter_.update(candidate.x, dt);
+        candidate.y = gravity_y_filter_.update(candidate.y, dt);
+        candidate.z = gravity_z_filter_.update(candidate.z, dt);
+      }
+      valid = normalize_vector(candidate);
+    }
+
+    if (valid) {
+      gravity_up_body_ = candidate;
+      gravity_invalid_elapsed_s_ = 0.0;
+      gravity_ready_accumulated_s_ += dt;
+      if (!gravity_reference_ready_ &&
+        gravity_ready_accumulated_s_ >= imu_gravity_ready_dwell_s_)
+      {
+        gravity_reference_ready_ = true;
+        calibrated_ = true;
+        RCLCPP_INFO(
+          get_logger(),
+          "Gravity attitude reference ready: source=%s up_body=(%+.4f,%+.4f,%+.4f) "
+          "accel_norm=%.3fm/s^2",
+          imu_gravity_source_.c_str(), gravity_up_body_.x, gravity_up_body_.y,
+          gravity_up_body_.z, gravity_accel_norm_mps2_);
+      }
+    } else {
+      gravity_ready_accumulated_s_ = 0.0;
+      gravity_invalid_elapsed_s_ += dt;
+      if (gravity_reference_ready_ && gravity_invalid_elapsed_s_ > imu_gravity_timeout_s_) {
+        gravity_reference_ready_ = false;
+        gravity_filter_initialized_ = false;
+        calibrated_ = false;
+        RCLCPP_ERROR(get_logger(), "Gravity attitude reference lost");
+      }
+    }
+    return gravity_reference_ready_;
+  }
+
+  bool attitude_reference_ready() const
+  {
+    return imu_reference_mode_ == "gravity" ? gravity_reference_ready_ : calibrated_;
+  }
+
   bool attitude(
     const ImuSample & imu, double & roll, double & roll_rate,
     double & pitch, double & pitch_rate, double & yaw_rate) const
   {
-    if (!calibrated_) {
+    if (!attitude_reference_ready()) {
       return false;
     }
-    Quaternion current = imu.orientation;
-    if (!normalize_quaternion(current)) {
-      return false;
+    double reference_roll = 0.0;
+    double reference_pitch = 0.0;
+    if (imu_reference_mode_ == "gravity") {
+      reference_roll = gravity_roll(gravity_up_body_);
+      reference_pitch = gravity_pitch(gravity_up_body_);
+    } else {
+      Quaternion current = imu.orientation;
+      if (!imu.orientation_available || !normalize_quaternion(current)) {
+        return false;
+      }
+      const Quaternion relative = relative_quaternion(imu_zero_, current);
+      reference_roll = quaternion_roll(relative);
+      reference_pitch = quaternion_pitch(relative);
     }
-    const Quaternion relative = relative_quaternion(imu_zero_, current);
     roll = imu_roll_sign_ * (
-      imu_roll_axis_ == "pitch" ? quaternion_pitch(relative) : quaternion_roll(relative));
+      imu_roll_axis_ == "pitch" ? reference_pitch : reference_roll);
     pitch = imu_pitch_sign_ * (
-      imu_pitch_axis_ == "roll" ? quaternion_roll(relative) : quaternion_pitch(relative));
+      imu_pitch_axis_ == "roll" ? reference_roll : reference_pitch);
+    if (imu_reference_mode_ == "gravity") {
+      roll -= imu_mount_roll_rad_;
+      pitch -= imu_mount_pitch_rad_;
+    }
     roll_rate = imu_roll_rate_sign_ * axis_rate(imu, imu_roll_rate_axis_);
     pitch_rate = imu_pitch_rate_sign_ * axis_rate(imu, imu_pitch_rate_axis_);
     yaw_rate = imu_yaw_rate_sign_ * axis_rate(imu, imu_yaw_rate_axis_);
@@ -691,13 +825,19 @@ private:
 
   void calibrate(const Snapshot & s)
   {
-    Quaternion zero = s.imu.orientation;
-    if (!normalize_quaternion(zero)) {
-      RCLCPP_ERROR(get_logger(), "Calibration rejected: invalid IMU quaternion");
-      return;
+    if (imu_reference_mode_ == "relative") {
+      Quaternion zero = s.imu.orientation;
+      if (!s.imu.orientation_available || !normalize_quaternion(zero)) {
+        RCLCPP_ERROR(get_logger(), "Calibration rejected: invalid IMU quaternion");
+        return;
+      }
+      imu_zero_ = zero;
+      calibrated_ = true;
+    } else if (!gravity_reference_ready_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Motion origins reset, but gravity attitude reference is not ready yet");
     }
-    imu_zero_ = zero;
-    calibrated_ = true;
     armed_ = false;
     balance_armed_ = false;
     leg_ready_accumulated_s_ = 0.0;
@@ -712,7 +852,10 @@ private:
     }
     publish_all_disabled();
     RCLCPP_INFO(
-      get_logger(), "Zero calibrated: IMU, wheel encoders, and joint differentiators reset");
+      get_logger(),
+      imu_reference_mode_ == "relative" ?
+      "Relative IMU zero, wheel encoders, and joint differentiators reset" :
+      "Wheel encoders and joint differentiators reset; gravity attitude zero is unchanged");
   }
 
   BalanceInput make_balance_input(
@@ -877,8 +1020,11 @@ private:
 
   bool arm(const Snapshot & s, double dt)
   {
-    if (!calibrated_) {
-      RCLCPP_WARN(get_logger(), "Arm rejected: calibrate first");
+    if (!attitude_reference_ready()) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Arm rejected: %s attitude reference is not ready",
+        imu_reference_mode_.c_str());
       return false;
     }
     double roll = 0.0;
@@ -929,6 +1075,10 @@ private:
     // Match the original VMC behavior: switch 3 immediately enables the four joint
     // MIT position loops, even when the leg is far from the target wheel centre.
     // Wheel balance is armed separately after the leg reaches the target.
+    // Gravity-reference mode does not require switch 1: switch 3 captures only
+    // the current wheel origin, never the current body attitude.
+    balance_.calibrate_wheels(
+      s.motors[kLeftWheel].position, s.motors[kRightWheel].position);
     balance_.reset();
     reset_roll_controller(roll, roll_rate);
     reset_policy_state();
@@ -1038,7 +1188,12 @@ private:
       policy_output.observation[4], policy_output.observation[5],
       policy_output.observation[6], policy_output.observation[7],
       policy_output.observation[8], policy_output.observation[9],
-      policy_output.observation[10]};
+      policy_output.observation[10],
+      // Gravity-reference diagnostics start at index 86.
+      gravity_up_body_.x, gravity_up_body_.y, gravity_up_body_.z,
+      gravity_accel_norm_mps2_, attitude_reference_ready() ? 1.0 : 0.0,
+      imu_reference_mode_ == "gravity" ? 1.0 : 0.0,
+      imu_gravity_source_ == "orientation" ? 1.0 : 0.0};
     debug_pub_->publish(message);
   }
 
@@ -1052,6 +1207,9 @@ private:
     }
 
     const Snapshot s = snapshot();
+    if (s.imu.valid && age_seconds(steady_now, s.imu.received) <= imu_timeout_s_) {
+      (void)update_gravity_reference(s.imu, dt);
+    }
     std::string invalid_reason;
     if (!inputs_ready(s, steady_now, invalid_reason)) {
       if (armed_) {
@@ -1334,11 +1492,30 @@ private:
   std::string imu_roll_axis_{"roll"};
   std::string imu_roll_rate_axis_{"x"};
   std::string imu_yaw_rate_axis_{"z"};
+  std::string imu_reference_mode_{"gravity"};
+  std::string imu_gravity_source_{"orientation"};
   double imu_pitch_sign_{1.0};
   double imu_pitch_rate_sign_{1.0};
   double imu_roll_sign_{1.0};
   double imu_roll_rate_sign_{1.0};
   double imu_yaw_rate_sign_{1.0};
+  double imu_mount_roll_rad_{0.0};
+  double imu_mount_pitch_rad_{0.0};
+  double imu_gravity_accel_sign_{1.0};
+  double imu_gravity_filter_hz_{10.0};
+  double imu_gravity_norm_min_mps2_{7.8};
+  double imu_gravity_norm_max_mps2_{11.8};
+  double imu_gravity_ready_dwell_s_{0.20};
+  double imu_gravity_timeout_s_{0.20};
+  FirstOrderLowPass gravity_x_filter_{};
+  FirstOrderLowPass gravity_y_filter_{};
+  FirstOrderLowPass gravity_z_filter_{};
+  Vector3 gravity_up_body_{0.0, 0.0, 1.0};
+  double gravity_accel_norm_mps2_{0.0};
+  double gravity_ready_accumulated_s_{0.0};
+  double gravity_invalid_elapsed_s_{0.0};
+  bool gravity_filter_initialized_{false};
+  bool gravity_reference_ready_{false};
 
   // Independent roll controller. It changes only left/right leg target Y and does not
   // alter the existing pitch, forward-velocity, or yaw wheel-torque controller.

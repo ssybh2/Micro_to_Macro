@@ -53,6 +53,47 @@ double quaternion_pitch(const Quaternion & q)
   return std::asin(value);
 }
 
+bool normalize_vector(Vector3 & vector)
+{
+  const double norm = std::hypot(vector.x, std::hypot(vector.y, vector.z));
+  if (!std::isfinite(norm) || norm < 1.0e-12) {
+    return false;
+  }
+  vector.x /= norm;
+  vector.y /= norm;
+  vector.z /= norm;
+  return true;
+}
+
+Vector3 world_up_axis_in_body(const Quaternion & orientation)
+{
+  Quaternion q = orientation;
+  if (!normalize_quaternion(q)) {
+    return {};
+  }
+  // ROS orientation rotates vectors from the IMU/body frame into the world
+  // frame. R(q)^T * world_Z therefore expresses the gravity-opposing world
+  // up axis in IMU coordinates and is independent of yaw.
+  Vector3 up{
+    2.0 * (q.x * q.z - q.w * q.y),
+    2.0 * (q.y * q.z + q.w * q.x),
+    1.0 - 2.0 * (q.x * q.x + q.y * q.y)};
+  (void)normalize_vector(up);
+  return up;
+}
+
+double gravity_roll(const Vector3 & up_axis_in_body)
+{
+  return std::atan2(up_axis_in_body.y, up_axis_in_body.z);
+}
+
+double gravity_pitch(const Vector3 & up_axis_in_body)
+{
+  return std::atan2(
+    -up_axis_in_body.x,
+    std::hypot(up_axis_in_body.y, up_axis_in_body.z));
+}
+
 double JointCalibration::motor_to_joint(const double motor_position) const
 {
   if (!std::isfinite(motor_position) || std::abs(motor_sign) < 1.0e-12 ||

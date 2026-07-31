@@ -125,10 +125,21 @@ struct Quaternion
   double z{0.0};
 };
 
+struct Vector3
+{
+  double x{0.0};
+  double y{0.0};
+  double z{0.0};
+};
+
 bool normalize_quaternion(Quaternion & q);
 Quaternion relative_quaternion(const Quaternion & reference, Quaternion current);
 double quaternion_roll(const Quaternion & q);
 double quaternion_pitch(const Quaternion & q);
+bool normalize_vector(Vector3 & vector);
+Vector3 world_up_axis_in_body(const Quaternion & orientation);
+double gravity_roll(const Vector3 & up_axis_in_body);
+double gravity_pitch(const Vector3 & up_axis_in_body);
 
 struct JointCalibration
 {

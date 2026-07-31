@@ -21,8 +21,8 @@ class DebugMonitor(Node):
 
     def callback(self, msg: Float64MultiArray) -> None:
         d = msg.data
-        if len(d) < 86:
-            self.get_logger().warning(f'Expected at least 86 values, got {len(d)}')
+        if len(d) < 93:
+            self.get_logger().warning(f'Expected at least 93 values, got {len(d)}')
             return
         now_ns = self.get_clock().now().nanoseconds
         if now_ns - self.last_print_ns < int(self.period_s * 1e9):
@@ -38,7 +38,8 @@ class DebugMonitor(Node):
             f'B_L=({1000*d[7]:.1f},{1000*d[8]:.1f})mm '
             f'B_R=({1000*d[11]:.1f},{1000*d[12]:.1f})mm '
             f'policy={d[69]:+.3f} residual={d[70]:+.3f}/{d[71]:+.3f}Nm '
-            f'infer={d[73]:.1f}us wheel=({d[43]:+.3f},{d[44]:+.3f})Nm'
+            f'infer={d[73]:.1f}us gravity=({d[86]:+.3f},{d[87]:+.3f},{d[88]:+.3f}) '
+            f'g_ready={int(d[90] > 0.5)} wheel=({d[43]:+.3f},{d[44]:+.3f})Nm'
         )
 
 

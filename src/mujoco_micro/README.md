@@ -94,3 +94,20 @@ the exact normalized observation vector sent to the model.
 | 72 | combined common physical torque per wheel |
 | 73 / 74 | inference time in microseconds / policy active flag |
 | 75-85 | normalized policy observation indices 0-10 |
+
+## Gravity-referenced attitude
+
+With `imu.reference_mode: gravity` (the default), Pitch and Roll are measured
+against the world gravity/up direction extracted from the fused IMU quaternion.
+The pose at RC switch 1 is no longer used as the attitude zero. Switch 3 resets
+the wheel origin and arms the controller once the gravity reference is valid.
+
+- `imu.gravity_source: orientation` is recommended and rejects translational
+  acceleration by relying on the IMU's fused quaternion.
+- `imu.gravity_source: accelerometer` is a fallback for IMUs without a valid
+  fused orientation and requires stationary acceleration magnitude near gravity.
+- `imu.mount_roll_deg` and `imu.mount_pitch_deg` compensate fixed IMU mounting
+  misalignment and persist across power cycles.
+
+Debug indices 86-92 are gravity up-vector X/Y/Z in the IMU frame, raw
+acceleration norm, reference-ready flag, gravity-mode flag, and orientation-source flag.

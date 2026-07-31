@@ -41,7 +41,7 @@ mujoco_micro_node:
 
     height:
       enable: true
-      # left_y=-1/0/+1 分别对应 0.090/0.125/0.160 m。
+      # left_y=-1/0/+1 分别对应 min_m/center_m/max_m。
       center_m: 0.120
       min_m: 0.090
       max_m: 0.160
@@ -105,12 +105,27 @@ mujoco_micro_node:
         torque_sign: 1.0
 
     imu:
+      # gravity: 以世界重力方向定义绝对水平姿态，不再把拨杆1时的姿态记为零点。
+      # relative: 保留旧行为，拨杆1记录当前四元数作为相对零点。
+      reference_mode: "gravity"
+      # orientation 推荐：使用 IMU 内部融合四元数提取重力方向；
+      # accelerometer 备用：直接使用 linear_acceleration，易受车辆加减速影响。
+      gravity_source: "orientation"
+      mount_roll_deg: 0.0
+      mount_pitch_deg: 0.0
+      gravity_accel_sign: 1.0
+      gravity_filter_hz: 10.0
+      gravity_norm_min_mps2: 7.8
+      gravity_norm_max_mps2: 11.8
+      gravity_ready_dwell_s: 0.20
+      gravity_timeout_s: 0.20
+
       pitch_axis: "pitch"
       pitch_rate_axis: "y"
       pitch_sign: 1.0
       pitch_rate_sign: 1.0
 
-      # Roll 使用同一次 switch=1 相对四元数校准。
+      # gravity 模式下 Pitch/Roll 都使用同一个绝对重力参考。
       roll_axis: "roll"
       roll_rate_axis: "x"
       roll_sign: 1.0
@@ -124,12 +139,12 @@ mujoco_micro_node:
       imu_timeout_s: 0.05
       motor_timeout_s: 0.05
       rc_timeout_s: 0.20
-      arm_max_tilt_deg: 10.0
+      arm_max_tilt_deg: 30.0
       arm_max_pitch_rate_rad_s: 0.30
       fall_cutoff_deg: 35.0
       arm_max_roll_deg: 10.0
       arm_max_roll_rate_rad_s: 0.40
-      fall_cutoff_roll_deg: 25.0
+      fall_cutoff_roll_deg: 35.0
       calibrate_switch_value: 1
       arm_switch_value: 3
       disable_switch_value: 2
@@ -160,7 +175,7 @@ mujoco_micro_node:
       model_path: ""
       # 这两个数值必须与 Isaac Lab 训练/导出约定保持一致。
       residual_scale_nm: 0.060
-      # 原共同力矩上限 0.20 + 最大残差 0.06；仍受 0.45 Nm 硬限幅保护。
+      # 基线与残差叠加后的工作限幅；必须不小于基线限幅且不超过硬限幅。
       final_torque_limit_each_nm: 0.3
 
     rc:
@@ -211,7 +226,7 @@ mujoco_micro_node:
       kd_leg_difference_m_per_rad_s: 0.008
 
       # |left_target_y - right_target_y| 的最大值；0.016 表示总差最多 16 mm，单腿各偏 8 mm。
-      max_leg_difference_m: 0.10
+      max_leg_difference_m: 0.25
       leg_difference_slew_rate_mps: 0.10
 
       # right_x 满杆对应的最大 Roll 目标角和目标角变化速度。

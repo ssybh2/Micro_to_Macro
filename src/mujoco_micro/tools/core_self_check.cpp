@@ -11,6 +11,26 @@ using mujoco_micro::JointCalibration;
 
 int main()
 {
+  const double test_tilt = 10.0 * mujoco_micro::kPi / 180.0;
+  mujoco_micro::Quaternion pitch_q{
+    std::cos(0.5 * test_tilt), 0.0, std::sin(0.5 * test_tilt), 0.0};
+  const auto pitch_up = mujoco_micro::world_up_axis_in_body(pitch_q);
+  if (std::abs(mujoco_micro::gravity_pitch(pitch_up) - test_tilt) > 1.0e-12 ||
+    std::abs(mujoco_micro::gravity_roll(pitch_up)) > 1.0e-12)
+  {
+    std::cerr << "gravity-referenced pitch calculation failed\n";
+    return EXIT_FAILURE;
+  }
+  mujoco_micro::Quaternion roll_q{
+    std::cos(0.5 * test_tilt), std::sin(0.5 * test_tilt), 0.0, 0.0};
+  const auto roll_up = mujoco_micro::world_up_axis_in_body(roll_q);
+  if (std::abs(mujoco_micro::gravity_roll(roll_up) - test_tilt) > 1.0e-12 ||
+    std::abs(mujoco_micro::gravity_pitch(roll_up)) > 1.0e-12)
+  {
+    std::cerr << "gravity-referenced roll calculation failed\n";
+    return EXIT_FAILURE;
+  }
+
   FiveBarGeometry geometry;
   FiveBarKinematics kinematics(geometry);
 
