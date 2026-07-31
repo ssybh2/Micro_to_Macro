@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "ament_index_cpp/get_package_share_directory.hpp"
 #include "custom_msgs/msg/read_djirc.hpp"
 #include "custom_msgs/msg/read_dm_motor.hpp"
 #include "custom_msgs/msg/write_dm_motor_mit_control.hpp"
@@ -18,6 +19,7 @@
 
 #include "mujoco_micro/control_core.hpp"
 #include "mujoco_micro/kinematics.hpp"
+#include "mujoco_micro/policy_runner.hpp"
 
 namespace mujoco_micro
 {
@@ -53,6 +55,7 @@ struct RcSample
   double right_y{0.0};
   double right_x{0.0};
   double left_x{0.0};
+  double left_y{0.0};
   SteadyTime received{};
   bool valid{false};
 };
@@ -101,6 +104,26 @@ struct RollControlOutput
   double leg_difference_m{0.0};
   double left_target_y_m{0.0};
   double right_target_y_m{0.0};
+};
+
+struct HeightControlOutput
+{
+  double rc_left_y{0.0};
+  double command_m{0.125};
+  double target_m{0.125};
+  double target_rate_mps{0.0};
+  double measured_m{0.125};
+  double measured_rate_mps{0.0};
+};
+
+struct PolicyControlOutput
+{
+  std::array<float, PolicyRunner::kObservationSize> observation{};
+  double previous_action{0.0};
+  double action{0.0};
+  double residual_torque_nm{0.0};
+  double inference_time_us{0.0};
+  bool active{false};
 };
 
 class JointVelocityEstimator
@@ -157,6 +180,13 @@ public:
     }
     roll_filter_.configure(roll_angle_filter_hz_, control_period_s_);
     roll_rate_filter_.configure(roll_rate_filter_hz_, control_period_s_);
+    if (policy_enable_) {
+      if (policy_model_path_.empty()) {
+        policy_model_path_ = ament_index_cpp::get_package_share_directory("mujoco_micro") +
+          "/models/policy.onnx";
+      }
+      policy_.load(policy_model_path_);
+    }
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
@@ -179,6 +209,7 @@ public:
         rc_.right_y = msg->right_y;
         rc_.right_x = msg->right_x;
         rc_.left_x = msg->left_x;
+        rc_.left_y = msg->left_y;
         rc_.received = std::chrono::steady_clock::now();
         rc_.valid = true;
       });
@@ -243,6 +274,12 @@ public:
       "Roll control=%s RC=right_x max_target=%.2fdeg max_leg_difference=%.1fmm",
       roll_control_enable_ ? "enabled" : "disabled",
       roll_max_target_rad_ * 180.0 / kPi, 1000.0 * roll_max_leg_difference_m_);
+    RCLCPP_INFO(
+      get_logger(),
+      "Height RC=left_y range=[%.1f, %.1f]mm center=%.1fmm slew=%.1fmm/s; policy=%s%s",
+      1000.0 * height_min_m_, 1000.0 * height_max_m_, 1000.0 * height_center_m_,
+      1000.0 * height_target_slew_rate_mps_, policy_enable_ ? "enabled: " : "disabled",
+      policy_enable_ ? policy_model_path_.c_str() : "");
     RCLCPP_WARN(
       get_logger(),
       "Initial safety state is DISARMED. RC right switch: calibrate=%d, arm=%d, disable=%d",
@@ -325,6 +362,14 @@ private:
     leg_ready_dwell_s_ = parameter<double>(
       "leg_positioning.ready_dwell_s", 0.30);
     joint_velocity_filter_hz_ = parameter<double>("joint_state.velocity_filter_hz", 25.0);
+
+    height_control_enable_ = parameter<bool>("height.enable", true);
+    height_center_m_ = parameter<double>("height.center_m", 0.125);
+    height_min_m_ = parameter<double>("height.min_m", 0.090);
+    height_max_m_ = parameter<double>("height.max_m", 0.160);
+    height_target_slew_rate_mps_ = parameter<double>("height.target_slew_rate_mps", 0.060);
+    height_rc_deadband_ = parameter<double>("height.rc_deadband", 0.08);
+    height_rc_sign_ = parameter<double>("height.rc_sign", 1.0);
 
     calibrations_[kLeftJointA] = load_calibration(
       "joint_calibration.left_a", -0.340847969, 3.50454569, -1.0, 1.0, -1.0);
@@ -425,6 +470,12 @@ private:
     roll_angle_filter_hz_ = parameter<double>("roll.angle_filter_hz", 15.0);
     roll_rate_filter_hz_ = parameter<double>("roll.rate_filter_hz", 10.0);
 
+    policy_enable_ = parameter<bool>("policy.enable", true);
+    policy_model_path_ = parameter<std::string>("policy.model_path", "");
+    policy_residual_scale_nm_ = parameter<double>("policy.residual_scale_nm", 0.060);
+    policy_final_torque_limit_each_nm_ = parameter<double>(
+      "policy.final_torque_limit_each_nm", 0.260);
+
     balance_config_.cascade_attitude_k_pitch = parameter<double>("cascade.attitude_k_pitch", 8.0);
     balance_config_.cascade_attitude_k_pitch_rate = parameter<double>("cascade.attitude_k_pitch_rate", 0.06);
     balance_config_.cascade_position_kp_rad_per_m = parameter<double>("cascade.position_kp_rad_per_m", 0.12);
@@ -511,7 +562,7 @@ private:
     if (!sign_is_valid(imu_pitch_sign_) || !sign_is_valid(imu_pitch_rate_sign_) ||
       !sign_is_valid(imu_roll_sign_) || !sign_is_valid(imu_roll_rate_sign_) ||
       !sign_is_valid(imu_yaw_rate_sign_) || !sign_is_valid(roll_rc_sign_) ||
-      !sign_is_valid(roll_output_sign_))
+      !sign_is_valid(roll_output_sign_) || !sign_is_valid(height_rc_sign_))
     {
       throw std::runtime_error("IMU/roll signs must be exactly +1 or -1");
     }
@@ -523,6 +574,19 @@ private:
       roll_angle_filter_hz_ < 0.0 || roll_rate_filter_hz_ < 0.0)
     {
       throw std::runtime_error("invalid roll controller gain, limit, filter, or deadband");
+    }
+    if (!(height_min_m_ > 0.0) || !(height_min_m_ < height_center_m_) ||
+      !(height_center_m_ < height_max_m_) || !(height_target_slew_rate_mps_ > 0.0) ||
+      height_rc_deadband_ < 0.0 || height_rc_deadband_ >= 1.0)
+    {
+      throw std::runtime_error("invalid height range, slew rate, or RC deadband");
+    }
+    if (!(policy_residual_scale_nm_ > 0.0) ||
+      policy_final_torque_limit_each_nm_ < balance_config_.torque_limit_each_nm ||
+      policy_final_torque_limit_each_nm_ > balance_config_.hard_torque_limit_each_nm)
+    {
+      throw std::runtime_error(
+              "policy residual scale/final torque limit is invalid or exceeds the hard limit");
     }
     for (std::size_t i : {kLeftJointA, kLeftJointB, kRightJointA, kRightJointB}) {
       const auto & c = calibrations_[i];
@@ -641,6 +705,7 @@ private:
     balance_.calibrate_wheels(
       s.motors[kLeftWheel].position, s.motors[kRightWheel].position);
     reset_roll_controller(0.0, 0.0);
+    reset_policy_state();
     const auto q = joint_positions(s);
     for (std::size_t i = 0; i < 4; ++i) {
       joint_velocity_estimators_[i].reset(q[i]);
@@ -669,6 +734,81 @@ private:
     return input;
   }
 
+  double height_command_from_rc(double rc_left_y) const
+  {
+    if (!height_control_enable_) {
+      return vmc_config_.target_y_m;
+    }
+    const double shaped = height_rc_sign_ * shape_unit_stick(rc_left_y, height_rc_deadband_);
+    const double span = shaped >= 0.0 ?
+      height_max_m_ - height_center_m_ : height_center_m_ - height_min_m_;
+    return clamp_value(height_center_m_ + shaped * span, height_min_m_, height_max_m_);
+  }
+
+  static double leg_length_rate(const FiveBarState & state, double pivot_midpoint_x)
+  {
+    if (!state.valid || state.leg_length <= 1.0e-9) {
+      return 0.0;
+    }
+    const double relative_x = state.x - pivot_midpoint_x;
+    return (relative_x * state.x_dot + state.y * state.y_dot) / state.leg_length;
+  }
+
+  void reset_height_controller(double measured_height_m, double rc_left_y)
+  {
+    height_command_m_ = height_command_from_rc(rc_left_y);
+    height_target_m_ = clamp_value(measured_height_m, height_min_m_, height_max_m_);
+    height_target_rate_mps_ = 0.0;
+  }
+
+  HeightControlOutput update_height_controller(
+    double rc_left_y, const FiveBarState & left_state, const FiveBarState & right_state,
+    double dt)
+  {
+    HeightControlOutput out;
+    out.rc_left_y = clamp_value(rc_left_y, -1.0, 1.0);
+    out.measured_m = 0.5 * (left_state.leg_length + right_state.leg_length);
+    const double pivot_midpoint_x = 0.5 * geometry_.l5;
+    out.measured_rate_mps = 0.5 * (
+      leg_length_rate(left_state, pivot_midpoint_x) +
+      leg_length_rate(right_state, pivot_midpoint_x));
+
+    height_command_m_ = height_command_from_rc(out.rc_left_y);
+    const double old_target = height_target_m_;
+    const double max_step = height_target_slew_rate_mps_ * dt;
+    height_target_m_ += clamp_value(height_command_m_ - height_target_m_, -max_step, max_step);
+    height_target_m_ = clamp_value(height_target_m_, height_min_m_, height_max_m_);
+    height_target_rate_mps_ = (height_target_m_ - old_target) / std::max(dt, 1.0e-6);
+
+    out.command_m = height_command_m_;
+    out.target_m = height_target_m_;
+    out.target_rate_mps = height_target_rate_mps_;
+    return out;
+  }
+
+  void reset_policy_state()
+  {
+    policy_previous_action_ = 0.0;
+  }
+
+  std::array<float, PolicyRunner::kObservationSize> make_policy_observation(
+    double pitch, double pitch_rate, const HeightControlOutput & height,
+    const BalanceDebug & balance_debug) const
+  {
+    return {
+      static_cast<float>(pitch / 0.35),
+      static_cast<float>(pitch_rate / 2.0),
+      static_cast<float>(balance_debug.policy_wheel_position_m / 0.50),
+      static_cast<float>(balance_debug.policy_wheel_velocity_mps / 1.0),
+      static_cast<float>((height.measured_m - 0.125) / 0.035),
+      static_cast<float>(height.measured_rate_mps / 0.08),
+      static_cast<float>((height.command_m - 0.125) / 0.035),
+      static_cast<float>(height.target_rate_mps / 0.06),
+      static_cast<float>((height.target_m - height.measured_m) / 0.04),
+      static_cast<float>(balance_debug.common_torque_each_nm / 0.20),
+      static_cast<float>(policy_previous_action_)};
+  }
+
   void reset_roll_controller(double roll, double roll_rate)
   {
     roll_filter_.reset(roll);
@@ -678,7 +818,8 @@ private:
   }
 
   RollControlOutput update_roll_controller(
-    double roll, double roll_rate, double rc_right_x, double dt, bool active)
+    double roll, double roll_rate, double rc_right_x, double base_height_m,
+    double dt, bool active)
   {
     RollControlOutput out;
     out.roll_filtered_rad = roll_filter_.update(roll, dt);
@@ -704,15 +845,22 @@ private:
         requested_difference, -roll_max_leg_difference_m_, roll_max_leg_difference_m_);
     }
 
+    const double available_height = std::max(
+      0.0, std::min(base_height_m - height_min_m_, height_max_m_ - base_height_m));
+    const double effective_difference_limit = std::min(
+      roll_max_leg_difference_m_, 2.0 * available_height);
+    requested_difference = clamp_value(
+      requested_difference, -effective_difference_limit, effective_difference_limit);
+
     const double difference_step = roll_leg_difference_slew_rate_mps_ * dt;
     roll_leg_difference_m_ += clamp_value(
       requested_difference - roll_leg_difference_m_, -difference_step, difference_step);
     roll_leg_difference_m_ = clamp_value(
-      roll_leg_difference_m_, -roll_max_leg_difference_m_, roll_max_leg_difference_m_);
+      roll_leg_difference_m_, -effective_difference_limit, effective_difference_limit);
 
     out.leg_difference_m = roll_leg_difference_m_;
-    out.left_target_y_m = vmc_config_.target_y_m + 0.5 * roll_leg_difference_m_;
-    out.right_target_y_m = vmc_config_.target_y_m - 0.5 * roll_leg_difference_m_;
+    out.left_target_y_m = base_height_m + 0.5 * roll_leg_difference_m_;
+    out.right_target_y_m = base_height_m - 0.5 * roll_leg_difference_m_;
     return out;
   }
 
@@ -755,10 +903,18 @@ private:
     }
 
     const auto q = joint_positions(s);
+    const FiveBarState left_state = kinematics_.forward(q[0], q[1]);
+    const FiveBarState right_state = kinematics_.forward(q[2], q[3]);
+    if (!left_state.valid || !right_state.valid) {
+      RCLCPP_WARN(get_logger(), "Arm rejected: current five-bar state is invalid");
+      return false;
+    }
+    reset_height_controller(
+      0.5 * (left_state.leg_length + right_state.leg_length), s.rc.left_y);
     IkSolution left_ik;
     IkSolution right_ik;
     if (!solve_target(
-        q, vmc_config_.target_y_m, vmc_config_.target_y_m, left_ik, right_ik))
+        q, height_target_m_, height_target_m_, left_ik, right_ik))
     {
       RCLCPP_WARN(get_logger(), "Arm rejected: target wheel centre is unreachable");
       return false;
@@ -775,6 +931,7 @@ private:
     // Wheel balance is armed separately after the leg reaches the target.
     balance_.reset();
     reset_roll_controller(roll, roll_rate);
+    reset_policy_state();
     balance_armed_ = false;
     leg_ready_accumulated_s_ = 0.0;
     if (!balance_wait_for_leg_ready_ && balance_control_enable_) {
@@ -788,7 +945,7 @@ private:
       "Joint positioning started; max joint error=%.3f rad; target B=(%.1f, %.1f) mm; "
       "balance_wait=%s",
       max_joint_error, 1000.0 * vmc_config_.target_x_m,
-      1000.0 * vmc_config_.target_y_m,
+      1000.0 * height_target_m_,
       balance_wait_for_leg_ready_ ? "true" : "false");
     return true;
   }
@@ -804,6 +961,7 @@ private:
     arm_transition_required_ = true;
     balance_.reset();
     reset_roll_controller(0.0, 0.0);
+    reset_policy_state();
     publish_all_disabled();
   }
 
@@ -838,7 +996,8 @@ private:
     const FiveBarState & right_state, const VmcOutput & left_vmc,
     const VmcOutput & right_vmc, const BalanceDebug & balance_debug,
     const IkSolution & left_ik, const IkSolution & right_ik,
-    const RollControlOutput & roll_output, double rc_right_x)
+    const RollControlOutput & roll_output, const HeightControlOutput & height_output,
+    const PolicyControlOutput & policy_output, double rc_right_x)
   {
     std_msgs::msg::Float64MultiArray message;
     message.data = {
@@ -863,7 +1022,23 @@ private:
       roll_output.roll_filtered_rad, roll_output.roll_rate_filtered_rad_s,
       roll_output.target_roll_rad, roll_output.target_roll_command_rad,
       roll_output.error_rad, roll_output.leg_difference_m,
-      roll_output.left_target_y_m, roll_output.right_target_y_m, rc_right_x};
+      roll_output.left_target_y_m, roll_output.right_target_y_m, rc_right_x,
+      // Height/policy values start at index 60. Policy observations 0..10 are
+      // additionally copied verbatim to indices 75..85 for deployment auditing.
+      height_output.rc_left_y, height_output.command_m, height_output.target_m,
+      height_output.target_rate_mps, height_output.measured_m,
+      height_output.measured_rate_mps, balance_debug.policy_wheel_position_m,
+      balance_debug.policy_wheel_velocity_mps, policy_output.previous_action,
+      policy_output.action, policy_output.residual_torque_nm,
+      balance_debug.residual_torque_applied_each_nm,
+      balance_debug.combined_common_torque_each_nm, policy_output.inference_time_us,
+      policy_output.active ? 1.0 : 0.0,
+      policy_output.observation[0], policy_output.observation[1],
+      policy_output.observation[2], policy_output.observation[3],
+      policy_output.observation[4], policy_output.observation[5],
+      policy_output.observation[6], policy_output.observation[7],
+      policy_output.observation[8], policy_output.observation[9],
+      policy_output.observation[10]};
     debug_pub_->publish(message);
   }
 
@@ -943,8 +1118,12 @@ private:
       return;
     }
 
+    const HeightControlOutput height_output = update_height_controller(
+      s.rc.left_y, left_state, right_state, dt);
+
     const RollControlOutput roll_output = update_roll_controller(
-      roll, roll_rate, s.rc.right_x, dt, balance_armed_ && balance_control_enable_);
+      roll, roll_rate, s.rc.right_x, height_output.target_m, dt,
+      balance_armed_ && balance_control_enable_);
 
     IkSolution left_ik;
     IkSolution right_ik;
@@ -1013,6 +1192,7 @@ private:
         leg_ready_accumulated_s_ = 0.0;
       }
       if (!balance_wait_for_leg_ready_ || leg_ready_accumulated_s_ >= leg_ready_dwell_s_) {
+        reset_policy_state();
         balance_.arm(make_balance_input(s, pitch, pitch_rate, yaw_rate, dt));
         balance_armed_ = true;
         RCLCPP_INFO(
@@ -1023,8 +1203,37 @@ private:
     }
 
     BalanceOutput balance_output;
+    PolicyControlOutput policy_output;
     if (balance_control_enable_ && balance_armed_) {
-      balance_output = balance_.update(make_balance_input(s, pitch, pitch_rate, yaw_rate, dt));
+      const BalanceInput balance_input = make_balance_input(s, pitch, pitch_rate, yaw_rate, dt);
+      balance_output = balance_.prepare_update(balance_input);
+      double residual_torque_nm = 0.0;
+      double final_torque_limit_nm = balance_config_.torque_limit_each_nm;
+      if (policy_enable_) {
+        policy_output.active = true;
+        policy_output.previous_action = policy_previous_action_;
+        policy_output.observation = make_policy_observation(
+          pitch, pitch_rate, height_output, balance_output.debug);
+        float raw_action = 0.0F;
+        std::string policy_error;
+        const auto inference_start = std::chrono::steady_clock::now();
+        const bool inference_ok = policy_.infer(
+          policy_output.observation, raw_action, policy_error);
+        policy_output.inference_time_us = 1.0e6 * std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - inference_start).count();
+        if (!inference_ok) {
+          disarm("ONNX policy inference failed: " + policy_error);
+          return;
+        }
+        policy_output.action = clamp_value(static_cast<double>(raw_action), -1.0, 1.0);
+        policy_output.residual_torque_nm =
+          policy_output.action * policy_residual_scale_nm_;
+        residual_torque_nm = policy_output.residual_torque_nm;
+        final_torque_limit_nm = policy_final_torque_limit_each_nm_;
+        policy_previous_action_ = policy_output.action;
+      }
+      balance_.finalize_update(
+        balance_input, residual_torque_nm, final_torque_limit_nm, balance_output);
     }
     const bool wheel_enable = command_enable && balance_control_enable_ && balance_armed_;
     motor_pubs_[kLeftWheel]->publish(make_mit_command(
@@ -1038,20 +1247,23 @@ private:
 
     publish_debug(
       dt, pitch, pitch_rate, q, q_des, left_state, right_state, left_vmc,
-      right_vmc, balance_output.debug, left_ik, right_ik, roll_output, s.rc.right_x);
+      right_vmc, balance_output.debug, left_ik, right_ik, roll_output,
+      height_output, policy_output, s.rc.right_x);
 
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 200,
       "state=%s pitch=%+.2fdeg roll=%+.2f/%+.2fdeg dLeg=%+.1fmm max_qerr=%.3frad "
-      "x=%.4fm v=%+.4fm/s B_L=(%.1f,%.1f)mm B_R=(%.1f,%.1f)mm "
-      "wheel_tau=(%+.3f,%+.3f)Nm",
+      "height=%.1f/%.1fmm x=%.4fm v=%+.4fm/s B_L=(%.1f,%.1f)mm B_R=(%.1f,%.1f)mm "
+      "policy=%+.3f residual=%+.3fNm wheel_tau=(%+.3f,%+.3f)Nm",
       balance_armed_ ? "BALANCE" : "LEG_POSITIONING",
       pitch * 180.0 / kPi, roll_output.roll_filtered_rad * 180.0 / kPi,
       roll_output.target_roll_rad * 180.0 / kPi,
       roll_output.leg_difference_m * 1000.0, max_joint_error,
+      1000.0 * height_output.measured_m, 1000.0 * height_output.target_m,
       balance_output.debug.position_m, balance_output.debug.velocity_mps,
       left_state.x * 1000.0, left_state.y * 1000.0,
       right_state.x * 1000.0, right_state.y * 1000.0,
+      policy_output.action, policy_output.residual_torque_nm,
       balance_output.left_motor_torque_nm, balance_output.right_motor_torque_nm);
   }
 
@@ -1082,6 +1294,7 @@ private:
   BalanceController balance_{};
   std::array<JointCalibration, kMotorCount> calibrations_{};
   std::array<JointVelocityEstimator, 4> joint_velocity_estimators_{};
+  PolicyRunner policy_{};
 
   double control_period_s_{0.003};
   std::string profile_name_{"mujoco_validated_hardware"};
@@ -1098,6 +1311,23 @@ private:
   double leg_ready_joint_velocity_rad_s_{0.30};
   double leg_ready_dwell_s_{0.30};
   double joint_velocity_filter_hz_{25.0};
+
+  bool height_control_enable_{true};
+  double height_center_m_{0.125};
+  double height_min_m_{0.090};
+  double height_max_m_{0.160};
+  double height_target_slew_rate_mps_{0.060};
+  double height_rc_deadband_{0.08};
+  double height_rc_sign_{1.0};
+  double height_command_m_{0.125};
+  double height_target_m_{0.125};
+  double height_target_rate_mps_{0.0};
+
+  bool policy_enable_{true};
+  std::string policy_model_path_{};
+  double policy_residual_scale_nm_{0.060};
+  double policy_final_torque_limit_each_nm_{0.260};
+  double policy_previous_action_{0.0};
 
   std::string imu_pitch_axis_{"pitch"};
   std::string imu_pitch_rate_axis_{"y"};

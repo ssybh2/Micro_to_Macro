@@ -291,8 +291,16 @@ struct BalanceDebug
   double right_motor_command_nm{0.0};
   double velocity_motor_based_mps{0.0};
   double velocity_position_fd_mps{0.0};
+  // Policy observations use wheel-only states. Unlike position_m/velocity_mps,
+  // these deliberately contain no pitch compensation.
+  double policy_wheel_position_m{0.0};
+  double policy_wheel_velocity_mps{0.0};
+  double residual_torque_requested_each_nm{0.0};
+  double residual_torque_applied_each_nm{0.0};
+  double combined_common_torque_each_nm{0.0};
   double auto_trim_rad{0.0};
   bool torque_saturated{false};
+  bool residual_torque_saturated{false};
   bool outer_saturated{false};
 };
 
@@ -313,6 +321,10 @@ public:
   void arm(const BalanceInput & input);
   void reset();
   BalanceOutput update(const BalanceInput & input);
+  BalanceOutput prepare_update(const BalanceInput & input);
+  void finalize_update(
+    const BalanceInput & input, double residual_torque_each_nm,
+    double final_torque_limit_each_nm, BalanceOutput & output);
 
   bool armed_state_initialized() const noexcept {return arm_initialized_;}
 
@@ -324,8 +336,8 @@ private:
     double pitch, double pitch_rate, double position_error, double velocity_error,
     BalanceDebug & debug) const;
   double calculate_yaw(
-    double yaw_rate, double target_yaw_rate, double common_torque, double dt,
-    BalanceDebug & debug);
+    double yaw_rate, double target_yaw_rate, double common_torque,
+    double torque_limit_each_nm, double dt, BalanceDebug & debug);
   double apply_stiction(
     double total_torque, double position_error, double velocity, double pitch_rate,
     double target_velocity) const;
@@ -352,6 +364,9 @@ private:
   double last_position_m_{0.0};
   double velocity_from_position_mps_{0.0};
   double fd_elapsed_s_{0.0};
+  double observer_mean_wheel_angle_rad_{0.0};
+  double policy_wheel_origin_angle_rad_{0.0};
+  bool policy_wheel_origin_initialized_{false};
   double target_position_m_{0.0};
   double target_velocity_mps_{0.0};
   double target_yaw_rate_rad_s_{0.0};

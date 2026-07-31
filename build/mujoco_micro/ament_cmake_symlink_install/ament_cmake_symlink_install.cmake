@@ -310,14 +310,14 @@ message(STATUS "Execute custom install script")
 
 # begin of custom install code
 
-# install("TARGETS" "mujoco_micro_core" "mujoco_micro_node" "mujoco_micro_core_self_check" "ARCHIVE_DESTINATION" "lib" "LIBRARY_DESTINATION" "lib" "RUNTIME_DESTINATION" "lib/mujoco_micro")
+# install("TARGETS" "mujoco_micro_core" "mujoco_micro_policy" "mujoco_micro_node" "mujoco_micro_core_self_check" "ARCHIVE_DESTINATION" "lib" "LIBRARY_DESTINATION" "lib" "RUNTIME_DESTINATION" "lib/mujoco_micro")
 include("/home/uonaim/mujoco_micro/build/mujoco_micro/ament_cmake_symlink_install_targets_0_${CMAKE_INSTALL_CONFIG_NAME}.cmake")
 
 # install(DIRECTORY "include/" "DESTINATION" "include")
 ament_cmake_symlink_install_directory("/home/uonaim/mujoco_micro/src/mujoco_micro" DIRECTORY "include/" "DESTINATION" "include")
 
-# install(DIRECTORY "launch" "config" "DESTINATION" "share/mujoco_micro")
-ament_cmake_symlink_install_directory("/home/uonaim/mujoco_micro/src/mujoco_micro" DIRECTORY "launch" "config" "DESTINATION" "share/mujoco_micro")
+# install(DIRECTORY "launch" "config" "models" "DESTINATION" "share/mujoco_micro")
+ament_cmake_symlink_install_directory("/home/uonaim/mujoco_micro/src/mujoco_micro" DIRECTORY "launch" "config" "models" "DESTINATION" "share/mujoco_micro")
 
 # install(PROGRAMS "scripts/check_topics.sh" "scripts/check_message_api.sh" "scripts/mujoco_micro_debug_monitor.py" "scripts/generate_lqr_gains.py" "DESTINATION" "lib/mujoco_micro")
 ament_cmake_symlink_install_programs("/home/uonaim/mujoco_micro/src/mujoco_micro" PROGRAMS "scripts/check_topics.sh" "scripts/check_message_api.sh" "scripts/mujoco_micro_debug_monitor.py" "scripts/generate_lqr_gains.py" "DESTINATION" "lib/mujoco_micro")

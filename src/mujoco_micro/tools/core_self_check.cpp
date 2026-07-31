@@ -73,10 +73,27 @@ int main()
   balance.arm(balance_input);
   balance_input.left_sequence = 2;
   balance_input.right_sequence = 2;
-  const auto balance_output = balance.update(balance_input);
+  auto balance_output = balance.prepare_update(balance_input);
+  const double baseline_common = balance_output.debug.common_torque_each_nm;
+  balance.finalize_update(balance_input, 0.060, 0.260, balance_output);
   if (!std::isfinite(balance_output.left_motor_torque_nm) ||
-      !std::isfinite(balance_output.right_motor_torque_nm)) {
+    !std::isfinite(balance_output.right_motor_torque_nm))
+  {
     std::cerr << "balance output is non-finite\n";
+    return EXIT_FAILURE;
+  }
+  const double expected_common = mujoco_micro::clamp_value(
+    baseline_common + 0.060, -0.260, 0.260);
+  if (std::abs(balance_output.debug.combined_common_torque_each_nm - expected_common) > 1.0e-12 ||
+    std::abs(
+      balance_output.debug.residual_torque_applied_each_nm -
+      (expected_common - baseline_common)) > 1.0e-12)
+  {
+    std::cerr << "residual common torque composition mismatch\n";
+    return EXIT_FAILURE;
+  }
+  if (std::abs(balance_output.debug.policy_wheel_position_m) > 1.0e-12) {
+    std::cerr << "policy wheel origin was not reset on balance arm\n";
     return EXIT_FAILURE;
   }
   std::cout << "VMC tau A=" << vmc.tau_a << " B=" << vmc.tau_b << "\n";

@@ -33,6 +33,11 @@ def generate_launch_description():
             default_value='true',
             description='Enable forward velocity commands from the RC stick.',
         ),
+        DeclareLaunchArgument(
+            'policy_enable',
+            default_value='true',
+            description='Enable the ONNX residual balance policy.',
+        ),
         Node(
             package='mujoco_micro',
             executable='mujoco_micro_node',
@@ -48,6 +53,8 @@ def generate_launch_description():
                         LaunchConfiguration('require_rc'), value_type=bool),
                     'rc.velocity_command_enable': ParameterValue(
                         LaunchConfiguration('velocity_command_enable'), value_type=bool),
+                    'policy.enable': ParameterValue(
+                        LaunchConfiguration('policy_enable'), value_type=bool),
                 },
             ],
         ),

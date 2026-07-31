@@ -93,6 +93,7 @@ mujoco_micro_node_EXTERNAL_OBJECTS =
 mujoco_micro_node: CMakeFiles/mujoco_micro_node.dir/src/mujoco_micro_node.cpp.o
 mujoco_micro_node: CMakeFiles/mujoco_micro_node.dir/build.make
 mujoco_micro_node: libmujoco_micro_core.a
+mujoco_micro_node: libmujoco_micro_policy.a
 mujoco_micro_node: /opt/ros/humble/lib/librclcpp.so
 mujoco_micro_node: /opt/ros/humble/lib/libsensor_msgs__rosidl_typesupport_fastrtps_c.so
 mujoco_micro_node: /opt/ros/humble/lib/libsensor_msgs__rosidl_typesupport_fastrtps_cpp.so
@@ -105,6 +106,9 @@ mujoco_micro_node: /home/uonaim/foot_ws/install/custom_msgs/lib/libcustom_msgs__
 mujoco_micro_node: /home/uonaim/foot_ws/install/custom_msgs/lib/libcustom_msgs__rosidl_typesupport_introspection_cpp.so
 mujoco_micro_node: /home/uonaim/foot_ws/install/custom_msgs/lib/libcustom_msgs__rosidl_typesupport_cpp.so
 mujoco_micro_node: /home/uonaim/foot_ws/install/custom_msgs/lib/libcustom_msgs__rosidl_generator_py.so
+mujoco_micro_node: /usr/lib/x86_64-linux-gnu/libopencv_dnn.so.4.5.4d
+mujoco_micro_node: /usr/lib/x86_64-linux-gnu/libopencv_imgproc.so.4.5.4d
+mujoco_micro_node: /usr/lib/x86_64-linux-gnu/libopencv_core.so.4.5.4d
 mujoco_micro_node: /opt/ros/humble/lib/liblibstatistics_collector.so
 mujoco_micro_node: /opt/ros/humble/lib/librcl.so
 mujoco_micro_node: /opt/ros/humble/lib/librmw_implementation.so

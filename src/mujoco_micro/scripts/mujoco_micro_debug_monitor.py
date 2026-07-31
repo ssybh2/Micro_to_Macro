@@ -21,8 +21,8 @@ class DebugMonitor(Node):
 
     def callback(self, msg: Float64MultiArray) -> None:
         d = msg.data
-        if len(d) < 60:
-            self.get_logger().warning(f'Expected at least 60 values, got {len(d)}')
+        if len(d) < 86:
+            self.get_logger().warning(f'Expected at least 86 values, got {len(d)}')
             return
         now_ns = self.get_clock().now().nanoseconds
         if now_ns - self.last_print_ns < int(self.period_s * 1e9):
@@ -33,10 +33,12 @@ class DebugMonitor(Node):
             f'state={state:8s} pitch={math.degrees(d[4]):+6.2f}deg '
             f'roll={math.degrees(d[51]):+6.2f}/{math.degrees(d[53]):+6.2f}deg '
             f'dLeg={1000*d[56]:+6.1f}mm right_x={d[59]:+.2f} '
+            f'height={1000*d[64]:5.1f}/{1000*d[62]:5.1f}mm left_y={d[60]:+.2f} '
             f'qerr_data=see raw x={d[33]:+.4f}m v={d[34]:+.4f}m/s '
             f'B_L=({1000*d[7]:.1f},{1000*d[8]:.1f})mm '
             f'B_R=({1000*d[11]:.1f},{1000*d[12]:.1f})mm '
-            f'wheel=({d[43]:+.3f},{d[44]:+.3f})Nm'
+            f'policy={d[69]:+.3f} residual={d[70]:+.3f}/{d[71]:+.3f}Nm '
+            f'infer={d[73]:.1f}us wheel=({d[43]:+.3f},{d[44]:+.3f})Nm'
         )
 
 

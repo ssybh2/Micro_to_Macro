@@ -19,6 +19,10 @@ mujoco_micro/
 Build it on Ubuntu 22.04 after sourcing the ROS2 workspace that contains `custom_msgs`:
 
 ```bash
+sudo apt install libopencv-dev
+```
+
+```bash
 source /opt/ros/humble/setup.bash
 source ~/foot_ws/install/setup.bash
 cd ~/mujoco_micro

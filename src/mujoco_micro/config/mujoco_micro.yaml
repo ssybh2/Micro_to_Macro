@@ -36,7 +36,18 @@ mujoco_micro_node:
 
     leg:
       target_x_m: 0.035
+      # height.enable=false 时使用的固定高度；启用高度控制时由 left_y 动态覆盖。
       target_y_m: 0.120
+
+    height:
+      enable: true
+      # left_y=-1/0/+1 分别对应 0.090/0.125/0.160 m。
+      center_m: 0.120
+      min_m: 0.090
+      max_m: 0.160
+      target_slew_rate_mps: 0.060
+      rc_deadband: 0.08
+      rc_sign: 1.0
 
     vmc:
       total_supported_mass_kg: 2.8
@@ -134,7 +145,7 @@ mujoco_micro_node:
       output_gain_sign: -1.0
       left_motor_sign: -1.0
       right_motor_sign: 1.0
-      torque_limit_each_nm: 0.20
+      torque_limit_each_nm: 0.3
       hard_torque_limit_each_nm: 0.45
       pitch_filter_hz: 40.0
       pitch_rate_filter_hz: 25.0
@@ -142,6 +153,15 @@ mujoco_micro_node:
       position_velocity_filter_hz: 12.0
       outer_velocity_filter_hz: 8.0
       velocity_blend: 0.0
+
+    policy:
+      enable: true
+      # 空字符串表示使用随包安装的 share/mujoco_micro/models/policy.onnx。
+      model_path: ""
+      # 这两个数值必须与 Isaac Lab 训练/导出约定保持一致。
+      residual_scale_nm: 0.060
+      # 原共同力矩上限 0.20 + 最大残差 0.06；仍受 0.45 Nm 硬限幅保护。
+      final_torque_limit_each_nm: 0.3
 
     rc:
       velocity_command_enable: true
@@ -151,10 +171,10 @@ mujoco_micro_node:
       velocity_slew_rate_mps2: 1.0
 
     cascade:
-      attitude_k_pitch: 2.2
-      attitude_k_pitch_rate: 0.1
-      position_kp_rad_per_m: 0.2
-      velocity_kd_rad_per_mps: 0.19
+      attitude_k_pitch: 2.3
+      attitude_k_pitch_rate: 0.22
+      position_kp_rad_per_m: 0.4
+      velocity_kd_rad_per_mps: 0.26
       position_ki_rad_per_m_s: 0.0
       integral_enable: false
       integral_limit_m_s: 0.20

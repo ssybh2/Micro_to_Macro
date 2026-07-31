@@ -65,6 +65,7 @@ CMAKE_BINARY_DIR = /home/uonaim/mujoco_micro/build/mujoco_micro
 # The main recursive "all" target.
 all: CMakeFiles/mujoco_micro_core.dir/all
 all: CMakeFiles/mujoco_micro_node.dir/all
+all: CMakeFiles/mujoco_micro_policy.dir/all
 all: CMakeFiles/mujoco_micro_core_self_check.dir/all
 .PHONY : all
 
@@ -77,6 +78,7 @@ clean: CMakeFiles/uninstall.dir/clean
 clean: CMakeFiles/mujoco_micro_uninstall.dir/clean
 clean: CMakeFiles/mujoco_micro_core.dir/clean
 clean: CMakeFiles/mujoco_micro_node.dir/clean
+clean: CMakeFiles/mujoco_micro_policy.dir/clean
 clean: CMakeFiles/mujoco_micro_core_self_check.dir/clean
 .PHONY : clean
 
@@ -163,6 +165,7 @@ CMakeFiles/mujoco_micro_core.dir/clean:
 
 # All Build rule for target.
 CMakeFiles/mujoco_micro_node.dir/all: CMakeFiles/mujoco_micro_core.dir/all
+CMakeFiles/mujoco_micro_node.dir/all: CMakeFiles/mujoco_micro_policy.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_node.dir/build.make CMakeFiles/mujoco_micro_node.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_node.dir/build.make CMakeFiles/mujoco_micro_node.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles --progress-num=6,7 "Built target mujoco_micro_node"
@@ -170,7 +173,7 @@ CMakeFiles/mujoco_micro_node.dir/all: CMakeFiles/mujoco_micro_core.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/mujoco_micro_node.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 5
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/mujoco_micro_node.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 0
 .PHONY : CMakeFiles/mujoco_micro_node.dir/rule
@@ -183,6 +186,32 @@ mujoco_micro_node: CMakeFiles/mujoco_micro_node.dir/rule
 CMakeFiles/mujoco_micro_node.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_node.dir/build.make CMakeFiles/mujoco_micro_node.dir/clean
 .PHONY : CMakeFiles/mujoco_micro_node.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/mujoco_micro_policy.dir
+
+# All Build rule for target.
+CMakeFiles/mujoco_micro_policy.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles --progress-num=8,9 "Built target mujoco_micro_policy"
+.PHONY : CMakeFiles/mujoco_micro_policy.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/mujoco_micro_policy.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/mujoco_micro_policy.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 0
+.PHONY : CMakeFiles/mujoco_micro_policy.dir/rule
+
+# Convenience name for target.
+mujoco_micro_policy: CMakeFiles/mujoco_micro_policy.dir/rule
+.PHONY : mujoco_micro_policy
+
+# clean rule for target.
+CMakeFiles/mujoco_micro_policy.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/clean
+.PHONY : CMakeFiles/mujoco_micro_policy.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/mujoco_micro_core_self_check.dir

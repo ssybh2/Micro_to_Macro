@@ -2,6 +2,7 @@
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/mujoco_micro_uninstall.dir
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/mujoco_micro_core.dir
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/mujoco_micro_node.dir
+/home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/mujoco_micro_policy.dir
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/mujoco_micro_core_self_check.dir
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/test.dir
 /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/edit_cache.dir

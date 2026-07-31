@@ -11,10 +11,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(custom_msgs REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core dnn)
 
 add_library(mujoco_micro_core
   src/kinematics.cpp
@@ -26,8 +28,17 @@ target_include_directories(mujoco_micro_core PUBLIC
 )
 
 add_executable(mujoco_micro_node src/mujoco_micro_node.cpp)
-target_link_libraries(mujoco_micro_node mujoco_micro_core)
+add_library(mujoco_micro_policy src/policy_runner.cpp)
+target_include_directories(mujoco_micro_policy PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(mujoco_micro_policy ${OpenCV_LIBS})
+
+target_link_libraries(mujoco_micro_node mujoco_micro_core mujoco_micro_policy)
 ament_target_dependencies(mujoco_micro_node
+  ament_index_cpp
   rclcpp
   sensor_msgs
   std_msgs
@@ -39,6 +50,7 @@ target_link_libraries(mujoco_micro_core_self_check mujoco_micro_core)
 
 install(TARGETS
   mujoco_micro_core
+  mujoco_micro_policy
   mujoco_micro_node
   mujoco_micro_core_self_check
   ARCHIVE DESTINATION lib
@@ -47,7 +59,7 @@ install(TARGETS
 )
 
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch config models DESTINATION share/${PROJECT_NAME})
 
 install(PROGRAMS
   scripts/check_topics.sh

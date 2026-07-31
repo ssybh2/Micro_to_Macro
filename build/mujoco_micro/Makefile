@@ -224,6 +224,19 @@ mujoco_micro_node/fast:
 .PHONY : mujoco_micro_node/fast
 
 #=============================================================================
+# Target rules for targets named mujoco_micro_policy
+
+# Build rule for target.
+mujoco_micro_policy: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mujoco_micro_policy
+.PHONY : mujoco_micro_policy
+
+# fast build rule for target.
+mujoco_micro_policy/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/build
+.PHONY : mujoco_micro_policy/fast
+
+#=============================================================================
 # Target rules for targets named mujoco_micro_core_self_check
 
 # Build rule for target.
@@ -308,6 +321,30 @@ src/mujoco_micro_node.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_node.dir/build.make CMakeFiles/mujoco_micro_node.dir/src/mujoco_micro_node.cpp.s
 .PHONY : src/mujoco_micro_node.cpp.s
 
+src/policy_runner.o: src/policy_runner.cpp.o
+.PHONY : src/policy_runner.o
+
+# target to build an object file
+src/policy_runner.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/src/policy_runner.cpp.o
+.PHONY : src/policy_runner.cpp.o
+
+src/policy_runner.i: src/policy_runner.cpp.i
+.PHONY : src/policy_runner.i
+
+# target to preprocess a source file
+src/policy_runner.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/src/policy_runner.cpp.i
+.PHONY : src/policy_runner.cpp.i
+
+src/policy_runner.s: src/policy_runner.cpp.s
+.PHONY : src/policy_runner.s
+
+# target to generate assembly for a file
+src/policy_runner.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mujoco_micro_policy.dir/build.make CMakeFiles/mujoco_micro_policy.dir/src/policy_runner.cpp.s
+.PHONY : src/policy_runner.cpp.s
+
 tools/core_self_check.o: tools/core_self_check.cpp.o
 .PHONY : tools/core_self_check.o
 
@@ -350,6 +387,7 @@ help:
 	@echo "... mujoco_micro_core"
 	@echo "... mujoco_micro_core_self_check"
 	@echo "... mujoco_micro_node"
+	@echo "... mujoco_micro_policy"
 	@echo "... src/control_core.o"
 	@echo "... src/control_core.i"
 	@echo "... src/control_core.s"
@@ -359,6 +397,9 @@ help:
 	@echo "... src/mujoco_micro_node.o"
 	@echo "... src/mujoco_micro_node.i"
 	@echo "... src/mujoco_micro_node.s"
+	@echo "... src/policy_runner.o"
+	@echo "... src/policy_runner.i"
+	@echo "... src/policy_runner.s"
 	@echo "... tools/core_self_check.o"
 	@echo "... tools/core_self_check.i"
 	@echo "... tools/core_self_check.s"

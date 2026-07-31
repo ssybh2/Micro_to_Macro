@@ -627,6 +627,10 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/lib/x86_64-linux-gnu/cmake/fmt/fmt-config.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/fmt/fmt-targets-none.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/fmt/fmt-targets.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVConfig-version.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVConfig.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVModules-release.cmake"
+  "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVModules.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/spdlog/spdlogConfig.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/spdlog/spdlogConfigTargets-none.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/spdlog/spdlogConfigTargets.cmake"
@@ -703,5 +707,6 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/mujoco_micro_uninstall.dir/DependInfo.cmake"
   "CMakeFiles/mujoco_micro_core.dir/DependInfo.cmake"
   "CMakeFiles/mujoco_micro_node.dir/DependInfo.cmake"
+  "CMakeFiles/mujoco_micro_policy.dir/DependInfo.cmake"
   "CMakeFiles/mujoco_micro_core_self_check.dir/DependInfo.cmake"
   )

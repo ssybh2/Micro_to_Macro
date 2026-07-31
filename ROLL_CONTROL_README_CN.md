@@ -95,6 +95,9 @@ abs(left_target_y - right_target_y)
 | 58 | right target y [m] |
 | 59 | raw RC right_x |
 
+车高与 ONNX 策略调试量继续追加在索引 60~85；其中 75~85 是本周期实际送入模型的
+11 维归一化观测，原有 0~59 的含义不变。
+
 监视命令：
 
 ```bash

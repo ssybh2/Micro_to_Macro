@@ -162,6 +162,9 @@ void BalanceController::reset()
   last_position_m_ = 0.0;
   velocity_from_position_mps_ = 0.0;
   fd_elapsed_s_ = 0.0;
+  observer_mean_wheel_angle_rad_ = 0.0;
+  policy_wheel_origin_angle_rad_ = 0.0;
+  policy_wheel_origin_initialized_ = false;
   target_position_m_ = 0.0;
   target_velocity_mps_ = 0.0;
   target_yaw_rate_rad_s_ = 0.0;
@@ -194,6 +197,12 @@ void BalanceController::update_observer(const BalanceInput & input, BalanceDebug
     config_.left_encoder_sign * input.left_wheel_velocity_rad_s +
     config_.right_encoder_sign * input.right_wheel_velocity_rad_s);
   const double mean_rate = wheel_velocity_filter_.update(mean_rate_raw, dt);
+
+  observer_mean_wheel_angle_rad_ = mean_angle;
+  const double policy_origin = policy_wheel_origin_initialized_ ?
+    policy_wheel_origin_angle_rad_ : mean_angle;
+  debug.policy_wheel_position_m = config_.wheel_radius_m * (mean_angle - policy_origin);
+  debug.policy_wheel_velocity_mps = config_.wheel_radius_m * mean_rate_raw;
 
   debug.position_m = config_.wheel_radius_m * (
     mean_angle + config_.pitch_position_compensation_sign * pitch);
@@ -239,6 +248,8 @@ void BalanceController::arm(const BalanceInput & input)
 
   BalanceDebug debug;
   update_observer(input, debug);
+  policy_wheel_origin_angle_rad_ = observer_mean_wheel_angle_rad_;
+  policy_wheel_origin_initialized_ = true;
   target_position_m_ = debug.position_m;
   target_velocity_mps_ = 0.0;
   target_yaw_rate_rad_s_ = 0.0;
@@ -321,7 +332,7 @@ double BalanceController::calculate_lqr(
 
 double BalanceController::calculate_yaw(
   const double yaw_rate, const double target_yaw_rate, const double common_torque,
-  const double dt, BalanceDebug & debug)
+  const double torque_limit_each_nm, const double dt, BalanceDebug & debug)
 {
   const double filtered = yaw_rate_filter_.update(yaw_rate, dt);
   double accel = 0.0;
@@ -339,7 +350,7 @@ double BalanceController::calculate_yaw(
     config_.yaw_rate_kp_each_nm_per_rad_s * error -
     config_.yaw_rate_kd_each_nm_per_rad_s2 * filtered_accel) : 0.0;
 
-  const double headroom = std::max(0.0, config_.torque_limit_each_nm - std::abs(common_torque));
+  const double headroom = std::max(0.0, torque_limit_each_nm - std::abs(common_torque));
   const double allowed = std::min(config_.yaw_torque_limit_each_nm, headroom);
   const double target = clamp_value(raw, -allowed, allowed);
   if (!config_.yaw_enable || (!command_active && std::abs(rate_for_control) < 1.0e-12)) {
@@ -401,7 +412,7 @@ void BalanceController::update_auto_trim(
     auto_trim_rad_ + rate * dt, -config_.auto_trim_limit_rad, config_.auto_trim_limit_rad);
 }
 
-BalanceOutput BalanceController::update(const BalanceInput & input)
+BalanceOutput BalanceController::prepare_update(const BalanceInput & input)
 {
   BalanceOutput out;
   if (!arm_initialized_) {
@@ -453,15 +464,32 @@ BalanceOutput BalanceController::update(const BalanceInput & input)
   const double limited_total = clamp_value(total, -max_total, max_total);
   out.debug.torque_saturated = std::abs(total - limited_total) > 1.0e-12;
   out.debug.total_torque_limited_nm = limited_total;
-  const double common = 0.5 * limited_total;
-  out.debug.common_torque_each_nm = common;
-  const double yaw_diff = calculate_yaw(
-    input.yaw_rate_rad_s, target_yaw_rate_rad_s_, common, dt, out.debug);
+  out.debug.common_torque_each_nm = 0.5 * limited_total;
+  return out;
+}
 
-  const double left_physical = clamp_value(
-    common + yaw_diff, -config_.torque_limit_each_nm, config_.torque_limit_each_nm);
-  const double right_physical = clamp_value(
-    common - yaw_diff, -config_.torque_limit_each_nm, config_.torque_limit_each_nm);
+void BalanceController::finalize_update(
+  const BalanceInput & input, const double residual_torque_each_nm,
+  const double final_torque_limit_each_nm, BalanceOutput & out)
+{
+  const double dt = clamp_value(input.dt, 1.0e-6, 0.050);
+  const double limit = clamp_value(
+    final_torque_limit_each_nm, config_.torque_limit_each_nm,
+    config_.hard_torque_limit_each_nm);
+  const double baseline_common = out.debug.common_torque_each_nm;
+  const double requested_common = baseline_common + residual_torque_each_nm;
+  const double combined_common = clamp_value(requested_common, -limit, limit);
+  out.debug.residual_torque_requested_each_nm = residual_torque_each_nm;
+  out.debug.residual_torque_applied_each_nm = combined_common - baseline_common;
+  out.debug.combined_common_torque_each_nm = combined_common;
+  out.debug.residual_torque_saturated =
+    std::abs(requested_common - combined_common) > 1.0e-12;
+
+  const double yaw_diff = calculate_yaw(
+    input.yaw_rate_rad_s, target_yaw_rate_rad_s_, combined_common, limit, dt, out.debug);
+
+  const double left_physical = clamp_value(combined_common + yaw_diff, -limit, limit);
+  const double right_physical = clamp_value(combined_common - yaw_diff, -limit, limit);
   out.debug.left_physical_torque_nm = left_physical;
   out.debug.right_physical_torque_nm = right_physical;
   out.left_motor_torque_nm = config_.left_motor_sign * left_physical;
@@ -478,9 +506,16 @@ BalanceOutput BalanceController::update(const BalanceInput & input)
   update_auto_trim(
     out.debug.position_error_m, out.debug.velocity_mps,
     out.debug.pitch_filtered_rad, out.debug.pitch_rate_filtered_rad_s,
-    target_velocity_mps_, out.debug.outer_saturated, out.debug.torque_saturated, dt);
+    target_velocity_mps_, out.debug.outer_saturated,
+    out.debug.torque_saturated || out.debug.residual_torque_saturated, dt);
   out.debug.auto_trim_rad = auto_trim_rad_;
   out.debug.total_trim_rad = config_.manual_trim_rad + auto_trim_rad_;
+}
+
+BalanceOutput BalanceController::update(const BalanceInput & input)
+{
+  BalanceOutput out = prepare_update(input);
+  finalize_update(input, 0.0, config_.torque_limit_each_nm, out);
   return out;
 }
 
