@@ -1584,6 +1584,13 @@ private:
       return;
     }
     if (std::abs(wheel_position_m) > recovery_max_wheel_travel_m_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Recovery wheel bound details: x=%+.3fm limit=%.3fm v=%+.3fm/s "
+        "raw=(L=%+.3frad,R=%+.3frad) corrected=(L=%+.3frad,R=%+.3frad)",
+        wheel_position_m, recovery_max_wheel_travel_m_, wheel_velocity_mps,
+        s.motors[kLeftWheel].position, s.motors[kRightWheel].position,
+        left_unwrapped, right_unwrapped);
       disarm("recovery wheel travel bound exceeded");
       return;
     }
@@ -1714,6 +1721,7 @@ private:
     const bool stable =
       std::abs(pitch) <= recovery_success_pitch_rad_ &&
       std::abs(alignment_error) <= recovery_success_alignment_rad_ &&
+      std::abs(pitch_rate) <= recovery_success_pitch_rate_rad_s_ &&
       std::abs(filtered_pitch_rate) <= recovery_success_pitch_rate_rad_s_ &&
       std::abs(measured_height - recovery_goal_height_m_) <=
       recovery_success_height_tolerance_m_ &&
@@ -1757,6 +1765,7 @@ private:
       get_logger(), *get_clock(), 200,
       "state=RECOVERY pitch=%+.2fdeg align=%+.2fdeg height=%.1f/%.1fmm "
       "leg_angle=%+.1f/%+.1fdeg qerr=%.3frad tau_max=%.3fNm unlocked=%s "
+      "rate=%+.2f/%+.2frad/s x=%+.3fm v=%+.3fm/s dwell=%.3fs "
       "action=(%+.3f,%+.3f,%+.3f) wheel=%+.3f/%+.3fNm",
       pitch * 180.0 / kPi, alignment_error * 180.0 / kPi,
       1000.0 * measured_height, 1000.0 * recovery_height_target_m_,
@@ -1765,6 +1774,8 @@ private:
       max_recovery_joint_error,
       max_recovery_joint_torque,
       recovery_extension_unlocked_ ? "true" : "false",
+      pitch_rate, filtered_pitch_rate, wheel_position_m, wheel_velocity_mps,
+      recovery_success_dwell_accumulated_s_,
       recovery_previous_action_[0], recovery_previous_action_[1],
       recovery_previous_action_[2], recovery_wheel_effort_nm_,
       recovery_requested_wheel_effort_nm_);

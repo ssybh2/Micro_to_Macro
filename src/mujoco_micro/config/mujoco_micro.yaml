@@ -191,14 +191,15 @@ mujoco_micro_node:
       start_max_pitch_rate_rad_s: 4.0
       terminate_pitch_deg: 70.0
       max_duration_s: 8.0
-      max_wheel_travel_m: 0.80
+      # 起身允许必要的轮轴平移，但站直后不允许 Recovery 继续跑远。
+      max_wheel_travel_m: 0.30
 
       wheel_torque_limit_nm: 0.45
       # Recovery 动作是训练轮角坐标中的广义力矩，因此按 encoder_sign 映射。
       # 若单独做低力矩方向试验确认整体相反，只改 output_sign 为 -1。
       wheel_output_sign: 1.0
       # 防止 ONNX 首帧饱和时瞬间施加 0.45 Nm；约 0.225 s 才能从零升到满量程。
-      wheel_torque_slew_nm_s: 2.0
+      wheel_torque_slew_nm_s: 1000.0
       height_min_m: 0.012
       height_max_m: 0.130
       goal_height_m: 0.120
@@ -214,17 +215,23 @@ mujoco_micro_node:
       alignment_unlock_deg: 5.0
       alignment_relock_deg: 8.0
       alignment_unlock_dwell_s: 0.10
-      success_pitch_deg: 5.0
-      success_alignment_deg: 5.0
-      success_pitch_rate_rad_s: 0.35
-      success_height_tolerance_m: 0.010
-      success_wheel_velocity_mps: 0.30
-      success_dwell_s: 0.15
+      success_pitch_deg: 6.0
+      success_alignment_deg: 6.0
+      # 实机 recovery 的短暂直立窗口需要及时接管；代码同时检查原始和滤波角速度。
+      success_pitch_rate_rad_s: 0.80
+      # NORMAL/policy.onnx 的有效腿高下限是 90 mm。Recovery 扶正并进入该
+      # 区间后就交接，避免为了继续追到 105--120 mm 而产生过大轮位移；
+      # NORMAL 高度控制器随后缓升到 left_y 命令（中位为 120 mm）。
+      success_height_tolerance_m: 0.030
+      success_wheel_velocity_mps: 0.45
+      # 实机日志显示安全接管窗口约 9 ms；两个 333 Hz 周期可排除单帧毛刺。
+      success_dwell_s: 0.006
       pitch_rate_filter_hz: 1.675
 
       # 训练时的显式关节力矩 PD；代码会先限幅再作为 MIT 前馈力矩发送。
       joint_kp: 7.0
       joint_kd: 0.28
+      # 不得超过 joint_mit.hard_torque_limit_nm (1.5 Nm)。
       joint_torque_limit_nm: 1.5
       left_alpha0: 2.4430524286
       left_beta0: 0.6977234730
@@ -232,7 +239,8 @@ mujoco_micro_node:
       right_beta0: 0.6985402266
       hip_pivot_height_m: 0.1530
       chassis_com_height_m: 0.1895
-      handoff_blend_s: 0.10
+      # Recovery 最后一帧力矩在交接后不会继续更新，混合时间必须短。
+      handoff_blend_s: 0.03
 
     rc:
       velocity_command_enable: true
