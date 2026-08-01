@@ -130,9 +130,13 @@ torque, virtual-leg height rate, and virtual-leg fore/aft angle. Hip torques
 use the training-side explicit `Kp=7`, `Kd=0.28`, `+/-1.5 Nm` PD law. Extension
 stays locked until COM/wheel/gravity alignment is within 5 degrees for 0.10 s,
 and relocks outside 8 degrees. The automatic handoff requires pitch,
-alignment, pitch rate, 120 mm height, and wheel speed to remain within their
-configured success bounds for 0.15 s. Wheel torque and hip targets blend into
-NORMAL over `recovery.handoff_blend_s`.
+alignment, pitch rate, height, and wheel speed to remain within their configured
+success bounds. Wheel torque transfers to NORMAL over
+`recovery.wheel_handoff_blend_s`, while the recovery hip geometry and VMC
+feed-forward transition independently over `recovery.joint_handoff_blend_s`.
+Keeping the joint transition slower avoids an abrupt COM shift at handoff.
+`recovery.handoff_blend_s` remains only as a backward-compatible default when
+either split parameter is absent.
 
 Use `recovery_enable:=false` to restore direct NORMAL arming. Recovery safety,
 gate, model and handoff parameters are under `recovery:` in the YAML. Debug

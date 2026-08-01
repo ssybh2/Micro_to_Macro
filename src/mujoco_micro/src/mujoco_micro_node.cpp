@@ -338,12 +338,14 @@ public:
       policy_enable_ ? policy_model_path_.c_str() : "");
     RCLCPP_INFO(
       get_logger(),
-      "Recovery=%s%s policy=%.1fHz goal=%.1fmm start/fail pitch=%.1f/%.1fdeg handoff=%.2fs",
+      "Recovery=%s%s policy=%.1fHz goal=%.1fmm start/fail pitch=%.1f/%.1fdeg "
+      "handoff=(wheel=%.3fs,joint=%.3fs)",
       recovery_enable_ ? "enabled: " : "disabled",
       recovery_enable_ ? recovery_model_path_.c_str() : "",
       1.0 / recovery_policy_period_s_, 1000.0 * recovery_goal_height_m_,
       recovery_start_max_pitch_rad_ * 180.0 / kPi,
-      recovery_terminate_pitch_rad_ * 180.0 / kPi, recovery_handoff_blend_s_);
+      recovery_terminate_pitch_rad_ * 180.0 / kPi,
+      recovery_wheel_handoff_blend_s_, recovery_joint_handoff_blend_s_);
     RCLCPP_INFO(
       get_logger(),
       "Attitude reference=%s gravity_source=%s mount_trim=(roll=%+.2f,pitch=%+.2f)deg",
@@ -629,7 +631,16 @@ private:
       parameter<double>("recovery.hip_pivot_height_m", 0.1530);
     recovery_chassis_com_height_m_ =
       parameter<double>("recovery.chassis_com_height_m", 0.1895);
-    recovery_handoff_blend_s_ = parameter<double>("recovery.handoff_blend_s", 0.10);
+    // Keep the legacy parameter as the default for old configuration files, but split the
+    // transition because frozen recovery wheel effort and recovery leg geometry need very
+    // different time scales.  Wheel authority must move to NORMAL quickly; changing the leg
+    // geometry too quickly moves the COM and can throw the robot out of NORMAL's capture region.
+    const double legacy_handoff_blend_s =
+      parameter<double>("recovery.handoff_blend_s", 0.10);
+    recovery_wheel_handoff_blend_s_ =
+      parameter<double>("recovery.wheel_handoff_blend_s", legacy_handoff_blend_s);
+    recovery_joint_handoff_blend_s_ =
+      parameter<double>("recovery.joint_handoff_blend_s", legacy_handoff_blend_s);
 
     balance_config_.cascade_attitude_k_pitch = parameter<double>("cascade.attitude_k_pitch", 8.0);
     balance_config_.cascade_attitude_k_pitch_rate = parameter<double>("cascade.attitude_k_pitch_rate", 0.06);
@@ -779,7 +790,7 @@ private:
       recovery_joint_kd_ < 0.0 || !(recovery_joint_torque_limit_nm_ > 0.0) ||
       recovery_joint_torque_limit_nm_ > joint_hard_torque_limit_nm_ ||
       !(recovery_chassis_com_height_m_ >= recovery_hip_pivot_height_m_) ||
-      recovery_handoff_blend_s_ < 0.0)
+      recovery_wheel_handoff_blend_s_ < 0.0 || recovery_joint_handoff_blend_s_ < 0.0)
     {
       throw std::runtime_error("invalid recovery policy, gate, geometry, or safety parameter");
     }
@@ -1285,7 +1296,8 @@ private:
     double measured_height_m, double roll, double roll_rate, double dt)
   {
     recovery_active_ = false;
-    normal_handoff_active_ = recovery_handoff_blend_s_ > 0.0;
+    normal_handoff_active_ =
+      recovery_wheel_handoff_blend_s_ > 0.0 || recovery_joint_handoff_blend_s_ > 0.0;
     normal_handoff_elapsed_s_ = 0.0;
     normal_handoff_wheel_effort_nm_ = recovery_wheel_effort_nm_;
     normal_handoff_joint_target_ = recovery_joint_target_;
@@ -1299,9 +1311,11 @@ private:
     RCLCPP_WARN(
       get_logger(),
       "RECOVERY success; handing off to NORMAL at pitch=%+.2fdeg height=%.1fmm "
-      "wheel_effort=%+.3fNm",
+      "leg_target=%+.2fdeg wheel_effort=%+.3fNm blends=(wheel=%.3fs,joint=%.3fs)",
       pitch * 180.0 / kPi, 1000.0 * measured_height_m,
-      normal_handoff_wheel_effort_nm_);
+      recovery_leg_angle_target_rad_ * 180.0 / kPi,
+      normal_handoff_wheel_effort_nm_, recovery_wheel_handoff_blend_s_,
+      recovery_joint_handoff_blend_s_);
   }
 
   bool solve_target(
@@ -1916,13 +1930,21 @@ private:
       right_vmc_config);
 
     const bool command_enable = !dry_run_;
-    const double handoff_blend = normal_handoff_active_ ? clamp_value(
-      normal_handoff_elapsed_s_ / std::max(recovery_handoff_blend_s_, 1.0e-6),
-      0.0, 1.0) : 1.0;
+    const auto transition_blend = [this](double duration_s) {
+        if (!normal_handoff_active_ || duration_s <= 0.0) {
+          return 1.0;
+        }
+        const double linear = clamp_value(normal_handoff_elapsed_s_ / duration_s, 0.0, 1.0);
+        // Cubic smoothstep has zero slope at both ends, avoiding a target-velocity or
+        // torque-slope discontinuity when either part of the transition starts or ends.
+        return linear * linear * (3.0 - 2.0 * linear);
+      };
+    const double wheel_handoff_blend = transition_blend(recovery_wheel_handoff_blend_s_);
+    const double joint_handoff_blend = transition_blend(recovery_joint_handoff_blend_s_);
     std::array<double, 4> blended_q_des = q_des;
     if (normal_handoff_active_) {
       for (std::size_t i = 0; i < blended_q_des.size(); ++i) {
-        blended_q_des[i] = normal_handoff_joint_target_[i] + handoff_blend *
+        blended_q_des[i] = normal_handoff_joint_target_[i] + joint_handoff_blend *
           (q_des[i] - normal_handoff_joint_target_[i]);
       }
     }
@@ -1943,7 +1965,7 @@ private:
       motor_pubs_[joint_indices[i]]->publish(make_mit_command(
         enabled, p_des_motor[i], 0.0, enabled ? joint_mit_kp_ : 0.0,
         enabled ? joint_mit_kd_ : 0.0,
-        enabled ? handoff_blend * joint_torque[i] : 0.0,
+        enabled ? joint_handoff_blend * joint_torque[i] : 0.0,
         joint_hard_torque_limit_nm_));
     }
 
@@ -2002,14 +2024,16 @@ private:
     }
     const bool wheel_enable = command_enable && balance_control_enable_ && balance_armed_;
     const double left_wheel_command_nm = normal_handoff_active_ ?
-      (1.0 - handoff_blend) * recovery_wheel_output_sign_ *
+      (1.0 - wheel_handoff_blend) * recovery_wheel_output_sign_ *
       balance_config_.left_encoder_sign *
-      normal_handoff_wheel_effort_nm_ + handoff_blend * balance_output.left_motor_torque_nm :
+      normal_handoff_wheel_effort_nm_ +
+      wheel_handoff_blend * balance_output.left_motor_torque_nm :
       balance_output.left_motor_torque_nm;
     const double right_wheel_command_nm = normal_handoff_active_ ?
-      (1.0 - handoff_blend) * recovery_wheel_output_sign_ *
+      (1.0 - wheel_handoff_blend) * recovery_wheel_output_sign_ *
       balance_config_.right_encoder_sign *
-      normal_handoff_wheel_effort_nm_ + handoff_blend * balance_output.right_motor_torque_nm :
+      normal_handoff_wheel_effort_nm_ +
+      wheel_handoff_blend * balance_output.right_motor_torque_nm :
       balance_output.right_motor_torque_nm;
     motor_pubs_[kLeftWheel]->publish(make_mit_command(
       wheel_enable, 0.0, 0.0, 0.0, 0.0,
@@ -2022,9 +2046,13 @@ private:
 
     if (normal_handoff_active_) {
       normal_handoff_elapsed_s_ += dt;
-      if (normal_handoff_elapsed_s_ >= recovery_handoff_blend_s_) {
+      if (normal_handoff_elapsed_s_ >= std::max(
+          recovery_wheel_handoff_blend_s_, recovery_joint_handoff_blend_s_))
+      {
         normal_handoff_active_ = false;
-        RCLCPP_INFO(get_logger(), "NORMAL handoff blend complete");
+        RCLCPP_INFO(
+          get_logger(), "NORMAL handoff complete (wheel=%.3fs, joint=%.3fs)",
+          recovery_wheel_handoff_blend_s_, recovery_joint_handoff_blend_s_);
       }
     }
 
@@ -2037,7 +2065,7 @@ private:
       get_logger(), *get_clock(), 200,
       "state=%s pitch=%+.2fdeg roll=%+.2f/%+.2fdeg dLeg=%+.1fmm max_qerr=%.3frad "
       "height=%.1f/%.1fmm x=%.4fm v=%+.4fm/s B_L=(%.1f,%.1f)mm B_R=(%.1f,%.1f)mm "
-      "policy=%+.3f residual=%+.3fNm wheel_tau=(%+.3f,%+.3f)Nm",
+      "policy=%+.3f residual=%+.3fNm handoff=%.2f/%.2f wheel_cmd=(%+.3f,%+.3f)Nm",
       balance_armed_ ? "BALANCE" : "LEG_POSITIONING",
       pitch * 180.0 / kPi, roll_output.roll_filtered_rad * 180.0 / kPi,
       roll_output.target_roll_rad * 180.0 / kPi,
@@ -2047,7 +2075,8 @@ private:
       left_state.x * 1000.0, left_state.y * 1000.0,
       right_state.x * 1000.0, right_state.y * 1000.0,
       policy_output.action, policy_output.residual_torque_nm,
-      balance_output.left_motor_torque_nm, balance_output.right_motor_torque_nm);
+      wheel_handoff_blend, joint_handoff_blend,
+      left_wheel_command_nm, right_wheel_command_nm);
   }
 
   mutable std::mutex data_mutex_;
@@ -2154,7 +2183,8 @@ private:
   double recovery_right_beta0_{0.6985402266};
   double recovery_hip_pivot_height_m_{0.1530};
   double recovery_chassis_com_height_m_{0.1895};
-  double recovery_handoff_blend_s_{0.10};
+  double recovery_wheel_handoff_blend_s_{0.10};
+  double recovery_joint_handoff_blend_s_{0.10};
   WrappedAngleUnwrapper recovery_left_wheel_unwrapper_{};
   WrappedAngleUnwrapper recovery_right_wheel_unwrapper_{};
   FirstOrderLowPass recovery_pitch_rate_filter_{};
