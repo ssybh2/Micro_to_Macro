@@ -38,6 +38,11 @@ def generate_launch_description():
             default_value='true',
             description='Enable the ONNX residual balance policy.',
         ),
+        DeclareLaunchArgument(
+            'recovery_enable',
+            default_value='true',
+            description='Run recovery_policy.onnx before normal balance when switch 3 is selected.',
+        ),
         Node(
             package='mujoco_micro',
             executable='mujoco_micro_node',
@@ -55,6 +60,8 @@ def generate_launch_description():
                         LaunchConfiguration('velocity_command_enable'), value_type=bool),
                     'policy.enable': ParameterValue(
                         LaunchConfiguration('policy_enable'), value_type=bool),
+                    'recovery.enable': ParameterValue(
+                        LaunchConfiguration('recovery_enable'), value_type=bool),
                 },
             ],
         ),

@@ -68,7 +68,7 @@ OpenCV DNN. The controller preserves the existing cascade controller as the
 baseline and adds the policy output as a common physical wheel-torque residual
 before yaw differential torque is applied.
 
-- `left_y`: absolute height command, `-1/0/+1` maps to `0.090/0.125/0.160 m`.
+- `left_y`: absolute height command, `-1/0/+1` maps to `0.090/0.120/0.160 m`.
 - Height target slew rate: `0.060 m/s`.
 - Policy action: clamped to `[-1, 1]`, then multiplied by `0.060 Nm`.
 - Disable only the residual policy with `policy_enable:=false`.
@@ -111,3 +111,37 @@ the wheel origin and arms the controller once the gravity reference is valid.
 
 Debug indices 86-92 are gravity up-vector X/Y/Z in the IMU frame, raw
 acceleration norm, reference-ready flag, gravity-mode flag, and orientation-source flag.
+
+## Recovery policy and automatic handoff
+
+With `recovery.enable: true`, RC switch 3 no longer requires the robot to
+already be inside the NORMAL 10-degree arm window. It runs the packaged
+`models/recovery_policy.onnx` first and then changes to the existing cascade
+controller plus `policy.onnx`:
+
+```text
+DISARMED -> RECOVERY -> NORMAL
+ switch 3    stable       cascade + residual policy
+ switch 2 from either active state immediately disables all motors
+```
+
+RECOVERY evaluates its 24-to-3 actor at 100 Hz. The actions are common wheel
+torque, virtual-leg height rate, and virtual-leg fore/aft angle. Hip torques
+use the training-side explicit `Kp=7`, `Kd=0.28`, `+/-1.5 Nm` PD law. Extension
+stays locked until COM/wheel/gravity alignment is within 5 degrees for 0.10 s,
+and relocks outside 8 degrees. The automatic handoff requires pitch,
+alignment, pitch rate, 120 mm height, and wheel speed to remain within their
+configured success bounds for 0.15 s. Wheel torque and hip targets blend into
+NORMAL over `recovery.handoff_blend_s`.
+
+Use `recovery_enable:=false` to restore direct NORMAL arming. Recovery safety,
+gate, model and handoff parameters are under `recovery:` in the YAML. Debug
+indices 93-115 contain the recovery state/action values, and indices 116-139
+are the exact normalized observation vector sent to the recovery model.
+
+Always validate the first run with motor output disabled:
+
+```bash
+ros2 launch mujoco_micro mujoco_micro.launch.py dry_run:=true recovery_enable:=true
+ros2 run mujoco_micro mujoco_micro_debug_monitor.py
+```

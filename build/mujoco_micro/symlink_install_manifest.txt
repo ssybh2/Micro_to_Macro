@@ -5,10 +5,12 @@
 /home/uonaim/mujoco_micro/install/mujoco_micro/include/mujoco_micro/control_core.hpp
 /home/uonaim/mujoco_micro/install/mujoco_micro/include/mujoco_micro/kinematics.hpp
 /home/uonaim/mujoco_micro/install/mujoco_micro/include/mujoco_micro/policy_runner.hpp
+/home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/launch/__pycache__/mujoco_micro.launch.cpython-310.pyc
 /home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/launch/mujoco_micro.launch.py
 /home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/config/mujoco_micro.yaml
 /home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/config/mujoco_micro_mujoco_equivalent.yaml
 /home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/models/policy.onnx
+/home/uonaim/mujoco_micro/install/mujoco_micro/share/mujoco_micro/models/recovery_policy.onnx
 /home/uonaim/mujoco_micro/install/mujoco_micro/lib/mujoco_micro/check_topics.sh
 /home/uonaim/mujoco_micro/install/mujoco_micro/lib/mujoco_micro/check_message_api.sh
 /home/uonaim/mujoco_micro/install/mujoco_micro/lib/mujoco_micro/mujoco_micro_debug_monitor.py

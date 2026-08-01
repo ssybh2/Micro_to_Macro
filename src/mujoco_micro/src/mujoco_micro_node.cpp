@@ -131,6 +131,27 @@ struct PolicyControlOutput
   bool active{false};
 };
 
+struct RecoveryControlOutput
+{
+  std::array<float, RecoveryPolicyRunner::kObservationSize> observation{};
+  std::array<double, RecoveryPolicyRunner::kActionSize> action{};
+  std::array<double, 4> joint_target{};
+  double measured_height_m{0.0};
+  double measured_height_rate_mps{0.0};
+  double height_target_m{0.0};
+  double height_target_rate_mps{0.0};
+  double measured_leg_angle_rad{0.0};
+  double leg_angle_target_rad{0.0};
+  double gravity_alignment_error_rad{0.0};
+  double wheel_position_m{0.0};
+  double wheel_velocity_mps{0.0};
+  double wheel_effort_nm{0.0};
+  double inference_time_us{0.0};
+  double success_dwell_s{0.0};
+  bool extension_unlocked{false};
+  bool active{false};
+};
+
 class JointVelocityEstimator
 {
 public:
@@ -169,6 +190,18 @@ bool sign_is_valid(const double value)
   return std::isfinite(value) && std::abs(std::abs(value) - 1.0) < 1.0e-9;
 }
 
+double wrap_to_pi(double angle)
+{
+  while (angle > kPi) {angle -= 2.0 * kPi;}
+  while (angle < -kPi) {angle += 2.0 * kPi;}
+  return angle;
+}
+
+double nearest_equivalent_angle(double angle, double reference)
+{
+  return angle + 2.0 * kPi * std::round((reference - angle) / (2.0 * kPi));
+}
+
 }  // namespace
 
 class MujocoMicroNode : public rclcpp::Node
@@ -188,12 +221,22 @@ public:
     gravity_x_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
     gravity_y_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
     gravity_z_filter_.configure(imu_gravity_filter_hz_, control_period_s_);
+    recovery_pitch_rate_filter_.configure(recovery_pitch_rate_filter_hz_, control_period_s_);
+    recovery_left_wheel_unwrapper_.configure(balance_config_.motor_position_wrap_half_range);
+    recovery_right_wheel_unwrapper_.configure(balance_config_.motor_position_wrap_half_range);
     if (policy_enable_) {
       if (policy_model_path_.empty()) {
         policy_model_path_ = ament_index_cpp::get_package_share_directory("mujoco_micro") +
           "/models/policy.onnx";
       }
       policy_.load(policy_model_path_);
+    }
+    if (recovery_enable_) {
+      if (recovery_model_path_.empty()) {
+        recovery_model_path_ = ament_index_cpp::get_package_share_directory("mujoco_micro") +
+          "/models/recovery_policy.onnx";
+      }
+      recovery_policy_.load(recovery_model_path_);
     }
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
@@ -293,6 +336,14 @@ public:
       1000.0 * height_min_m_, 1000.0 * height_max_m_, 1000.0 * height_center_m_,
       1000.0 * height_target_slew_rate_mps_, policy_enable_ ? "enabled: " : "disabled",
       policy_enable_ ? policy_model_path_.c_str() : "");
+    RCLCPP_INFO(
+      get_logger(),
+      "Recovery=%s%s policy=%.1fHz goal=%.1fmm start/fail pitch=%.1f/%.1fdeg handoff=%.2fs",
+      recovery_enable_ ? "enabled: " : "disabled",
+      recovery_enable_ ? recovery_model_path_.c_str() : "",
+      1.0 / recovery_policy_period_s_, 1000.0 * recovery_goal_height_m_,
+      recovery_start_max_pitch_rad_ * 180.0 / kPi,
+      recovery_terminate_pitch_rad_ * 180.0 / kPi, recovery_handoff_blend_s_);
     RCLCPP_INFO(
       get_logger(),
       "Attitude reference=%s gravity_source=%s mount_trim=(roll=%+.2f,pitch=%+.2f)deg",
@@ -512,6 +563,74 @@ private:
     policy_final_torque_limit_each_nm_ = parameter<double>(
       "policy.final_torque_limit_each_nm", 0.260);
 
+    recovery_enable_ = parameter<bool>("recovery.enable", true);
+    recovery_model_path_ = parameter<std::string>("recovery.model_path", "");
+    recovery_policy_period_s_ = parameter<double>("recovery.policy_period_s", 0.010);
+    recovery_start_max_pitch_rad_ =
+      parameter<double>("recovery.start_max_pitch_deg", 35.0) * kPi / 180.0;
+    recovery_start_max_pitch_rate_rad_s_ =
+      parameter<double>("recovery.start_max_pitch_rate_rad_s", 4.0);
+    recovery_terminate_pitch_rad_ =
+      parameter<double>("recovery.terminate_pitch_deg", 70.0) * kPi / 180.0;
+    recovery_max_duration_s_ = parameter<double>("recovery.max_duration_s", 8.0);
+    recovery_max_wheel_travel_m_ = parameter<double>("recovery.max_wheel_travel_m", 0.80);
+    recovery_wheel_torque_limit_nm_ =
+      parameter<double>("recovery.wheel_torque_limit_nm", 0.45);
+    recovery_wheel_output_sign_ = parameter<double>("recovery.wheel_output_sign", 1.0);
+    recovery_wheel_torque_slew_nm_s_ =
+      parameter<double>("recovery.wheel_torque_slew_nm_s", 2.0);
+    recovery_height_min_m_ = parameter<double>("recovery.height_min_m", 0.012);
+    recovery_height_max_m_ = parameter<double>("recovery.height_max_m", 0.130);
+    recovery_goal_height_m_ = parameter<double>("recovery.goal_height_m", 0.120);
+    recovery_height_rate_center_mps_ =
+      parameter<double>("recovery.height_rate_center_mps", 0.040);
+    recovery_height_rate_span_mps_ =
+      parameter<double>("recovery.height_rate_span_mps", 0.100);
+    recovery_height_rate_min_mps_ =
+      parameter<double>("recovery.height_rate_min_mps", -0.040);
+    recovery_height_rate_max_mps_ =
+      parameter<double>("recovery.height_rate_max_mps", 0.140);
+    recovery_leg_angle_limit_rad_ =
+      parameter<double>("recovery.leg_angle_limit_deg", 35.0) * kPi / 180.0;
+    recovery_leg_angle_rate_rad_s_ =
+      parameter<double>("recovery.leg_angle_rate_deg_s", 120.0) * kPi / 180.0;
+    recovery_tilt_unlock_min_height_m_ =
+      parameter<double>("recovery.tilt_unlock_min_height_m", 0.020);
+    recovery_tilt_unlock_full_height_m_ =
+      parameter<double>("recovery.tilt_unlock_full_height_m", 0.070);
+    recovery_alignment_unlock_rad_ =
+      parameter<double>("recovery.alignment_unlock_deg", 5.0) * kPi / 180.0;
+    recovery_alignment_relock_rad_ =
+      parameter<double>("recovery.alignment_relock_deg", 8.0) * kPi / 180.0;
+    recovery_alignment_unlock_dwell_s_ =
+      parameter<double>("recovery.alignment_unlock_dwell_s", 0.10);
+    recovery_success_pitch_rad_ =
+      parameter<double>("recovery.success_pitch_deg", 5.0) * kPi / 180.0;
+    recovery_success_alignment_rad_ =
+      parameter<double>("recovery.success_alignment_deg", 5.0) * kPi / 180.0;
+    recovery_success_pitch_rate_rad_s_ =
+      parameter<double>("recovery.success_pitch_rate_rad_s", 0.35);
+    recovery_success_height_tolerance_m_ =
+      parameter<double>("recovery.success_height_tolerance_m", 0.010);
+    recovery_success_wheel_velocity_mps_ =
+      parameter<double>("recovery.success_wheel_velocity_mps", 0.30);
+    recovery_success_dwell_s_ = parameter<double>("recovery.success_dwell_s", 0.15);
+    recovery_pitch_rate_filter_hz_ =
+      parameter<double>("recovery.pitch_rate_filter_hz", 1.675);
+    recovery_joint_kp_ = parameter<double>("recovery.joint_kp", 7.0);
+    recovery_joint_kd_ = parameter<double>("recovery.joint_kd", 0.28);
+    recovery_joint_torque_limit_nm_ =
+      parameter<double>("recovery.joint_torque_limit_nm", 1.5);
+    recovery_left_alpha0_ = parameter<double>("recovery.left_alpha0", 2.4430524286);
+    recovery_left_beta0_ = parameter<double>("recovery.left_beta0", 0.6977234730);
+    recovery_right_alpha0_ = parameter<double>("recovery.right_alpha0", 2.4438691429);
+    recovery_right_beta0_ = parameter<double>("recovery.right_beta0", 0.6985402266);
+    recovery_hip_pivot_height_m_ =
+      parameter<double>("recovery.hip_pivot_height_m", 0.1530);
+    recovery_chassis_com_height_m_ =
+      parameter<double>("recovery.chassis_com_height_m", 0.1895);
+    recovery_handoff_blend_s_ = parameter<double>("recovery.handoff_blend_s", 0.10);
+
     balance_config_.cascade_attitude_k_pitch = parameter<double>("cascade.attitude_k_pitch", 8.0);
     balance_config_.cascade_attitude_k_pitch_rate = parameter<double>("cascade.attitude_k_pitch_rate", 0.06);
     balance_config_.cascade_position_kp_rad_per_m = parameter<double>("cascade.position_kp_rad_per_m", 0.12);
@@ -637,6 +756,32 @@ private:
     {
       throw std::runtime_error(
               "policy residual scale/final torque limit is invalid or exceeds the hard limit");
+    }
+    if (!(recovery_policy_period_s_ > 0.0) || !(recovery_start_max_pitch_rad_ > 0.0) ||
+      recovery_start_max_pitch_rad_ > recovery_terminate_pitch_rad_ ||
+      recovery_start_max_pitch_rate_rad_s_ < 0.0 ||
+      !(recovery_terminate_pitch_rad_ < kPi) || !(recovery_max_duration_s_ > 0.0) ||
+      !(recovery_max_wheel_travel_m_ > 0.0) ||
+      !(recovery_wheel_torque_limit_nm_ > 0.0) ||
+      recovery_wheel_torque_limit_nm_ > balance_config_.hard_torque_limit_each_nm ||
+      !sign_is_valid(recovery_wheel_output_sign_) ||
+      !(recovery_wheel_torque_slew_nm_s_ > 0.0) ||
+      !(recovery_height_min_m_ > 0.0) ||
+      !(recovery_height_min_m_ < recovery_goal_height_m_) ||
+      !(recovery_goal_height_m_ < recovery_height_max_m_) ||
+      !(recovery_height_rate_min_mps_ < recovery_height_rate_max_mps_) ||
+      recovery_height_rate_span_mps_ < 0.0 || !(recovery_leg_angle_limit_rad_ > 0.0) ||
+      !(recovery_leg_angle_rate_rad_s_ > 0.0) ||
+      !(recovery_tilt_unlock_min_height_m_ < recovery_tilt_unlock_full_height_m_) ||
+      !(recovery_alignment_unlock_rad_ < recovery_alignment_relock_rad_) ||
+      recovery_alignment_unlock_dwell_s_ < 0.0 || !(recovery_success_dwell_s_ > 0.0) ||
+      recovery_pitch_rate_filter_hz_ < 0.0 || recovery_joint_kp_ < 0.0 ||
+      recovery_joint_kd_ < 0.0 || !(recovery_joint_torque_limit_nm_ > 0.0) ||
+      recovery_joint_torque_limit_nm_ > joint_hard_torque_limit_nm_ ||
+      !(recovery_chassis_com_height_m_ >= recovery_hip_pivot_height_m_) ||
+      recovery_handoff_blend_s_ < 0.0)
+    {
+      throw std::runtime_error("invalid recovery policy, gate, geometry, or safety parameter");
     }
     for (std::size_t i : {kLeftJointA, kLeftJointB, kRightJointA, kRightJointB}) {
       const auto & c = calibrations_[i];
@@ -840,6 +985,8 @@ private:
     }
     armed_ = false;
     balance_armed_ = false;
+    recovery_active_ = false;
+    normal_handoff_active_ = false;
     leg_ready_accumulated_s_ = 0.0;
     arm_transition_required_ = true;
     balance_.calibrate_wheels(
@@ -1007,6 +1154,156 @@ private:
     return out;
   }
 
+  std::array<double, 4> recovery_model_joint_positions(
+    const std::array<double, 4> & q) const
+  {
+    return {
+      recovery_left_alpha0_ - q[0], recovery_left_beta0_ - q[1],
+      recovery_right_alpha0_ - q[2], recovery_right_beta0_ - q[3]};
+  }
+
+  double recovery_mean_leg_angle(
+    const FiveBarState & left_state, const FiveBarState & right_state) const
+  {
+    const double offset =
+      0.5 * (left_state.x + right_state.x) - 0.5 * geometry_.l5;
+    const double down = 0.5 * (left_state.y + right_state.y);
+    return std::atan2(offset, down);
+  }
+
+  double recovery_alignment_error(
+    double pitch, const FiveBarState & left_state, const FiveBarState & right_state) const
+  {
+    const double offset = 0.5 * (left_state.x + right_state.x) - 0.5 * geometry_.l5;
+    const double down = 0.5 * (left_state.y + right_state.y);
+    const double com_down = down +
+      (recovery_chassis_com_height_m_ - recovery_hip_pivot_height_m_);
+    return wrap_to_pi(pitch + std::atan2(offset, com_down));
+  }
+
+  void initialize_recovery(
+    const Snapshot & s, const std::array<double, 4> & q,
+    const FiveBarState & left_state, const FiveBarState & right_state,
+    double pitch_rate)
+  {
+    recovery_left_wheel_unwrapper_.reset(s.motors[kLeftWheel].position);
+    recovery_right_wheel_unwrapper_.reset(s.motors[kRightWheel].position);
+    recovery_height_target_m_ = clamp_value(
+      0.5 * (left_state.leg_length + right_state.leg_length),
+      recovery_height_min_m_, recovery_height_max_m_);
+    recovery_height_target_rate_mps_ = 0.0;
+    recovery_last_measured_height_m_ =
+      0.5 * (left_state.leg_length + right_state.leg_length);
+    recovery_leg_angle_target_rad_ = recovery_mean_leg_angle(left_state, right_state);
+    recovery_previous_action_.fill(0.0);
+    recovery_joint_target_ = q;
+    recovery_wheel_effort_nm_ = 0.0;
+    recovery_requested_wheel_effort_nm_ = 0.0;
+    recovery_policy_phase_s_ = 0.0;
+    recovery_observation_elapsed_s_ = 0.0;
+    recovery_alignment_dwell_s_ = 0.0;
+    recovery_success_dwell_accumulated_s_ = 0.0;
+    recovery_elapsed_s_ = 0.0;
+    recovery_extension_unlocked_ = false;
+    recovery_pitch_rate_filter_.reset(pitch_rate);
+    recovery_debug_ = RecoveryControlOutput{};
+    recovery_debug_.active = true;
+    recovery_active_ = true;
+    normal_handoff_active_ = false;
+    balance_armed_ = false;
+    leg_ready_accumulated_s_ = 0.0;
+    balance_.calibrate_wheels(
+      s.motors[kLeftWheel].position, s.motors[kRightWheel].position);
+    reset_policy_state();
+    reset_roll_controller(0.0, 0.0);
+    for (std::size_t i = 0; i < q.size(); ++i) {
+      joint_velocity_estimators_[i].reset(q[i]);
+    }
+  }
+
+  std::array<float, RecoveryPolicyRunner::kObservationSize> make_recovery_observation(
+    double pitch, double pitch_rate, double wheel_position_m, double wheel_velocity_mps,
+    double measured_height_m, double measured_height_rate_mps,
+    double measured_leg_angle_rad, double alignment_error_rad,
+    const std::array<double, 4> & q, const std::array<double, 4> & qdot) const
+  {
+    const auto model_q = recovery_model_joint_positions(q);
+    const std::array<double, 4> model_qdot{-qdot[0], -qdot[1], -qdot[2], -qdot[3]};
+    std::array<float, RecoveryPolicyRunner::kObservationSize> observation{};
+    observation[0] = static_cast<float>(pitch / 0.60);
+    observation[1] = static_cast<float>(pitch_rate / 4.0);
+    observation[2] = static_cast<float>(wheel_position_m / 0.50);
+    observation[3] = static_cast<float>(wheel_velocity_mps / 1.50);
+    observation[4] = static_cast<float>((measured_height_m - 0.070) / 0.055);
+    observation[5] = static_cast<float>(measured_height_rate_mps / 0.15);
+    observation[6] = static_cast<float>((recovery_height_target_m_ - 0.070) / 0.055);
+    observation[7] = static_cast<float>((recovery_goal_height_m_ - measured_height_m) / 0.105);
+    observation[8] = static_cast<float>(measured_leg_angle_rad / 0.60);
+    observation[9] = static_cast<float>(alignment_error_rad / 0.60);
+    for (std::size_t i = 0; i < 4; ++i) {
+      observation[10 + i] = static_cast<float>(model_q[i] / 0.70);
+      observation[14 + i] = static_cast<float>(model_qdot[i] / 5.0);
+    }
+    observation[18] = static_cast<float>(recovery_wheel_effort_nm_ / 0.45);
+    observation[19] = static_cast<float>(recovery_height_target_rate_mps_ / 0.14);
+    for (std::size_t i = 0; i < recovery_previous_action_.size(); ++i) {
+      observation[20 + i] = static_cast<float>(recovery_previous_action_[i]);
+    }
+    observation[23] = recovery_extension_unlocked_ ? 1.0F : 0.0F;
+    return observation;
+  }
+
+  bool solve_recovery_target(
+    const std::array<double, 4> & q, std::array<double, 4> & q_des,
+    IkSolution & left_ik, IkSolution & right_ik) const
+  {
+    const double unlock = clamp_value(
+      (recovery_height_target_m_ - recovery_tilt_unlock_min_height_m_) /
+      (recovery_tilt_unlock_full_height_m_ - recovery_tilt_unlock_min_height_m_),
+      0.0, 1.0);
+    const double safe_angle = recovery_leg_angle_target_rad_ * unlock;
+    const double target_x = 0.5 * geometry_.l5 +
+      recovery_height_target_m_ * std::sin(safe_angle);
+    const double target_y = recovery_height_target_m_ * std::cos(safe_angle);
+    left_ik = kinematics_.inverse(target_x, target_y, q[0], q[1]);
+    right_ik = kinematics_.inverse(target_x, target_y, q[2], q[3]);
+    if (!left_ik.valid || !right_ik.valid) {
+      return false;
+    }
+    q_des = {left_ik.alpha, left_ik.beta, right_ik.alpha, right_ik.beta};
+    for (std::size_t i = 0; i < q_des.size(); ++i) {
+      // FiveBarKinematics returns principal angles in [-pi, pi]. Recovery
+      // trajectories at very short leg lengths can cross that branch cut;
+      // command the equivalent angle nearest the measured continuous joint.
+      q_des[i] = nearest_equivalent_angle(q_des[i], q[i]);
+    }
+    return true;
+  }
+
+  void handoff_recovery_to_normal(
+    const Snapshot & s, double pitch, double pitch_rate, double yaw_rate,
+    double measured_height_m, double roll, double roll_rate, double dt)
+  {
+    recovery_active_ = false;
+    normal_handoff_active_ = recovery_handoff_blend_s_ > 0.0;
+    normal_handoff_elapsed_s_ = 0.0;
+    normal_handoff_wheel_effort_nm_ = recovery_wheel_effort_nm_;
+    normal_handoff_joint_target_ = recovery_joint_target_;
+    reset_height_controller(measured_height_m, s.rc.left_y);
+    balance_.calibrate_wheels(
+      s.motors[kLeftWheel].position, s.motors[kRightWheel].position);
+    balance_.arm(make_balance_input(s, pitch, pitch_rate, yaw_rate, dt));
+    balance_armed_ = true;
+    reset_policy_state();
+    reset_roll_controller(roll, roll_rate);
+    RCLCPP_WARN(
+      get_logger(),
+      "RECOVERY success; handing off to NORMAL at pitch=%+.2fdeg height=%.1fmm "
+      "wheel_effort=%+.3fNm",
+      pitch * 180.0 / kPi, 1000.0 * measured_height_m,
+      normal_handoff_wheel_effort_nm_);
+  }
+
   bool solve_target(
     const std::array<double, 4> & q, double left_target_y_m, double right_target_y_m,
     IkSolution & left_ik, IkSolution & right_ik) const
@@ -1036,8 +1333,12 @@ private:
       RCLCPP_WARN(get_logger(), "Arm rejected: invalid attitude");
       return false;
     }
-    if (std::abs(pitch) > arm_max_tilt_rad_ ||
-      std::abs(pitch_rate) > arm_max_pitch_rate_rad_s_ ||
+    const double arm_pitch_limit = recovery_enable_ ?
+      recovery_start_max_pitch_rad_ : arm_max_tilt_rad_;
+    const double arm_pitch_rate_limit = recovery_enable_ ?
+      recovery_start_max_pitch_rate_rad_s_ : arm_max_pitch_rate_rad_s_;
+    if (std::abs(pitch) > arm_pitch_limit ||
+      std::abs(pitch_rate) > arm_pitch_rate_limit ||
       std::abs(roll) > arm_max_roll_rad_ ||
       std::abs(roll_rate) > arm_max_roll_rate_rad_s_)
     {
@@ -1054,6 +1355,25 @@ private:
     if (!left_state.valid || !right_state.valid) {
       RCLCPP_WARN(get_logger(), "Arm rejected: current five-bar state is invalid");
       return false;
+    }
+    if (recovery_enable_) {
+      const double measured_height = 0.5 * (left_state.leg_length + right_state.leg_length);
+      if (measured_height < recovery_height_min_m_ - 0.010 ||
+        measured_height > recovery_height_max_m_ + 0.015)
+      {
+        RCLCPP_WARN(
+          get_logger(), "Arm rejected: recovery height %.1fmm is outside safety bounds",
+          1000.0 * measured_height);
+        return false;
+      }
+      initialize_recovery(s, q, left_state, right_state, pitch_rate);
+      armed_ = true;
+      arm_transition_required_ = false;
+      RCLCPP_WARN(
+        get_logger(),
+        "RECOVERY armed at pitch=%+.2fdeg height=%.1fmm; wheels and hips are now controlled",
+        pitch * 180.0 / kPi, 1000.0 * measured_height);
+      return true;
     }
     reset_height_controller(
       0.5 * (left_state.leg_length + right_state.leg_length), s.rc.left_y);
@@ -1107,6 +1427,8 @@ private:
     }
     armed_ = false;
     balance_armed_ = false;
+    recovery_active_ = false;
+    normal_handoff_active_ = false;
     leg_ready_accumulated_s_ = 0.0;
     arm_transition_required_ = true;
     balance_.reset();
@@ -1147,7 +1469,8 @@ private:
     const VmcOutput & right_vmc, const BalanceDebug & balance_debug,
     const IkSolution & left_ik, const IkSolution & right_ik,
     const RollControlOutput & roll_output, const HeightControlOutput & height_output,
-    const PolicyControlOutput & policy_output, double rc_right_x)
+    const PolicyControlOutput & policy_output, double rc_right_x,
+    const RecoveryControlOutput & recovery_output = RecoveryControlOutput{})
   {
     std_msgs::msg::Float64MultiArray message;
     message.data = {
@@ -1193,8 +1516,263 @@ private:
       gravity_up_body_.x, gravity_up_body_.y, gravity_up_body_.z,
       gravity_accel_norm_mps2_, attitude_reference_ready() ? 1.0 : 0.0,
       imu_reference_mode_ == "gravity" ? 1.0 : 0.0,
-      imu_gravity_source_ == "orientation" ? 1.0 : 0.0};
+      imu_gravity_source_ == "orientation" ? 1.0 : 0.0,
+      // Recovery diagnostics start at index 93. Observation 0..23 is copied
+      // verbatim to indices 116..139 for deployment auditing.
+      recovery_output.active ? 1.0 : 0.0,
+      recovery_output.extension_unlocked ? 1.0 : 0.0,
+      recovery_elapsed_s_, recovery_alignment_dwell_s_, recovery_output.success_dwell_s,
+      recovery_output.measured_height_m, recovery_output.measured_height_rate_mps,
+      recovery_output.height_target_m, recovery_output.height_target_rate_mps,
+      recovery_output.measured_leg_angle_rad, recovery_output.leg_angle_target_rad,
+      recovery_output.gravity_alignment_error_rad, recovery_output.wheel_position_m,
+      recovery_output.wheel_velocity_mps, recovery_output.wheel_effort_nm,
+      recovery_output.action[0], recovery_output.action[1], recovery_output.action[2],
+      recovery_output.inference_time_us,
+      recovery_output.joint_target[0], recovery_output.joint_target[1],
+      recovery_output.joint_target[2], recovery_output.joint_target[3],
+      recovery_output.observation[0], recovery_output.observation[1],
+      recovery_output.observation[2], recovery_output.observation[3],
+      recovery_output.observation[4], recovery_output.observation[5],
+      recovery_output.observation[6], recovery_output.observation[7],
+      recovery_output.observation[8], recovery_output.observation[9],
+      recovery_output.observation[10], recovery_output.observation[11],
+      recovery_output.observation[12], recovery_output.observation[13],
+      recovery_output.observation[14], recovery_output.observation[15],
+      recovery_output.observation[16], recovery_output.observation[17],
+      recovery_output.observation[18], recovery_output.observation[19],
+      recovery_output.observation[20], recovery_output.observation[21],
+      recovery_output.observation[22], recovery_output.observation[23]};
     debug_pub_->publish(message);
+  }
+
+  void control_recovery(
+    const Snapshot & s, double dt, double roll, double roll_rate,
+    double pitch, double pitch_rate, double yaw_rate,
+    const std::array<double, 4> & q, const std::array<double, 4> & qdot,
+    const FiveBarState & left_state, const FiveBarState & right_state)
+  {
+    recovery_elapsed_s_ += dt;
+    const double measured_height = 0.5 * (left_state.leg_length + right_state.leg_length);
+    const double measured_leg_angle = recovery_mean_leg_angle(left_state, right_state);
+    const double alignment_error = recovery_alignment_error(
+      pitch, left_state, right_state);
+    const double filtered_pitch_rate = recovery_pitch_rate_filter_.update(pitch_rate, dt);
+
+    const double left_unwrapped = balance_config_.left_encoder_sign *
+      recovery_left_wheel_unwrapper_.update(s.motors[kLeftWheel].position);
+    const double right_unwrapped = balance_config_.right_encoder_sign *
+      recovery_right_wheel_unwrapper_.update(s.motors[kRightWheel].position);
+    const double wheel_position_m = balance_config_.wheel_radius_m *
+      0.5 * (left_unwrapped + right_unwrapped);
+    const double wheel_velocity_mps = balance_config_.wheel_radius_m * 0.5 * (
+      balance_config_.left_encoder_sign * s.motors[kLeftWheel].velocity +
+      balance_config_.right_encoder_sign * s.motors[kRightWheel].velocity);
+
+    if (std::abs(pitch) > recovery_terminate_pitch_rad_) {
+      disarm("recovery pitch failure bound exceeded");
+      return;
+    }
+    if (std::abs(roll) > fall_cutoff_roll_rad_) {
+      disarm("recovery roll safety angle exceeded");
+      return;
+    }
+    if (measured_height < recovery_height_min_m_ - 0.010 ||
+      measured_height > recovery_height_max_m_ + 0.015)
+    {
+      disarm("recovery virtual-leg height safety bound exceeded");
+      return;
+    }
+    if (std::abs(wheel_position_m) > recovery_max_wheel_travel_m_) {
+      disarm("recovery wheel travel bound exceeded");
+      return;
+    }
+    if (recovery_elapsed_s_ > recovery_max_duration_s_) {
+      disarm("recovery timeout");
+      return;
+    }
+
+    if (std::abs(alignment_error) <= recovery_alignment_unlock_rad_) {
+      recovery_alignment_dwell_s_ += dt;
+    } else {
+      recovery_alignment_dwell_s_ = 0.0;
+    }
+    if (recovery_alignment_dwell_s_ >= recovery_alignment_unlock_dwell_s_) {
+      recovery_extension_unlocked_ = true;
+    }
+    if (recovery_extension_unlocked_ &&
+      std::abs(alignment_error) > recovery_alignment_relock_rad_)
+    {
+      recovery_extension_unlocked_ = false;
+      recovery_alignment_dwell_s_ = 0.0;
+    }
+
+    recovery_policy_phase_s_ += dt;
+    recovery_observation_elapsed_s_ += dt;
+    if (recovery_policy_phase_s_ + 1.0e-9 >= recovery_policy_period_s_) {
+      recovery_policy_phase_s_ = std::fmod(recovery_policy_phase_s_, recovery_policy_period_s_);
+      const double observation_dt = std::max(recovery_observation_elapsed_s_, 1.0e-6);
+      const double measured_height_rate =
+        (measured_height - recovery_last_measured_height_m_) / observation_dt;
+      recovery_last_measured_height_m_ = measured_height;
+      recovery_observation_elapsed_s_ = 0.0;
+
+      recovery_debug_.observation = make_recovery_observation(
+        pitch, pitch_rate, wheel_position_m, wheel_velocity_mps,
+        measured_height, measured_height_rate, measured_leg_angle,
+        alignment_error, q, qdot);
+      std::array<float, RecoveryPolicyRunner::kActionSize> raw_action{};
+      std::string inference_error;
+      const auto inference_start = std::chrono::steady_clock::now();
+      const bool inference_ok = recovery_policy_.infer(
+        recovery_debug_.observation, raw_action, inference_error);
+      recovery_debug_.inference_time_us = 1.0e6 * std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - inference_start).count();
+      if (!inference_ok) {
+        disarm("recovery ONNX inference failed: " + inference_error);
+        return;
+      }
+      for (std::size_t i = 0; i < raw_action.size(); ++i) {
+        recovery_previous_action_[i] = clamp_value(
+          static_cast<double>(raw_action[i]), -1.0, 1.0);
+        recovery_debug_.action[i] = recovery_previous_action_[i];
+      }
+
+      recovery_requested_wheel_effort_nm_ = clamp_value(
+        recovery_previous_action_[0] * recovery_wheel_torque_limit_nm_,
+        -recovery_wheel_torque_limit_nm_, recovery_wheel_torque_limit_nm_);
+      double requested_height_rate = clamp_value(
+        recovery_height_rate_center_mps_ +
+        recovery_height_rate_span_mps_ * recovery_previous_action_[1],
+        recovery_height_rate_min_mps_, recovery_height_rate_max_mps_);
+      if (!recovery_extension_unlocked_ ||
+        std::abs(alignment_error) > recovery_alignment_relock_rad_)
+      {
+        requested_height_rate = 0.0;
+      }
+      const double old_height_target = recovery_height_target_m_;
+      recovery_height_target_m_ = clamp_value(
+        recovery_height_target_m_ + requested_height_rate * recovery_policy_period_s_,
+        recovery_height_min_m_, recovery_height_max_m_);
+      recovery_height_target_rate_mps_ =
+        (recovery_height_target_m_ - old_height_target) / recovery_policy_period_s_;
+
+      const double requested_leg_angle =
+        recovery_previous_action_[2] * recovery_leg_angle_limit_rad_;
+      const double max_leg_angle_step =
+        recovery_leg_angle_rate_rad_s_ * recovery_policy_period_s_;
+      recovery_leg_angle_target_rad_ += clamp_value(
+        requested_leg_angle - recovery_leg_angle_target_rad_,
+        -max_leg_angle_step, max_leg_angle_step);
+      recovery_debug_.measured_height_rate_mps = measured_height_rate;
+    }
+
+    const double wheel_effort_step = recovery_wheel_torque_slew_nm_s_ * dt;
+    recovery_wheel_effort_nm_ += clamp_value(
+      recovery_requested_wheel_effort_nm_ - recovery_wheel_effort_nm_,
+      -wheel_effort_step, wheel_effort_step);
+
+    IkSolution left_ik;
+    IkSolution right_ik;
+    std::array<double, 4> q_des{};
+    if (!solve_recovery_target(q, q_des, left_ik, right_ik)) {
+      disarm("recovery virtual-leg IK is invalid");
+      return;
+    }
+    recovery_joint_target_ = q_des;
+
+    const bool command_enable = !dry_run_;
+    const std::array<std::size_t, 4> joint_indices{
+      kLeftJointA, kLeftJointB, kRightJointA, kRightJointB};
+    double max_recovery_joint_error = 0.0;
+    double max_recovery_joint_torque = 0.0;
+    for (std::size_t i = 0; i < joint_indices.size(); ++i) {
+      const double physical_joint_torque = clamp_value(
+        recovery_joint_kp_ * (q_des[i] - q[i]) - recovery_joint_kd_ * qdot[i],
+        -recovery_joint_torque_limit_nm_, recovery_joint_torque_limit_nm_);
+      max_recovery_joint_error = std::max(
+        max_recovery_joint_error, std::abs(q_des[i] - q[i]));
+      max_recovery_joint_torque = std::max(
+        max_recovery_joint_torque, std::abs(physical_joint_torque));
+      const double motor_torque = calibrations_[joint_indices[i]].torque_sign *
+        physical_joint_torque;
+      motor_pubs_[joint_indices[i]]->publish(make_mit_command(
+        command_enable && joint_control_enable_, 0.0, 0.0, 0.0, 0.0,
+        motor_torque, recovery_joint_torque_limit_nm_));
+    }
+    motor_pubs_[kLeftWheel]->publish(make_mit_command(
+      command_enable && balance_control_enable_, 0.0, 0.0, 0.0, 0.0,
+      recovery_wheel_output_sign_ * balance_config_.left_encoder_sign *
+      recovery_wheel_effort_nm_,
+      recovery_wheel_torque_limit_nm_));
+    motor_pubs_[kRightWheel]->publish(make_mit_command(
+      command_enable && balance_control_enable_, 0.0, 0.0, 0.0, 0.0,
+      recovery_wheel_output_sign_ * balance_config_.right_encoder_sign *
+      recovery_wheel_effort_nm_,
+      recovery_wheel_torque_limit_nm_));
+
+    const bool stable =
+      std::abs(pitch) <= recovery_success_pitch_rad_ &&
+      std::abs(alignment_error) <= recovery_success_alignment_rad_ &&
+      std::abs(filtered_pitch_rate) <= recovery_success_pitch_rate_rad_s_ &&
+      std::abs(measured_height - recovery_goal_height_m_) <=
+      recovery_success_height_tolerance_m_ &&
+      std::abs(wheel_velocity_mps) <= recovery_success_wheel_velocity_mps_;
+    recovery_success_dwell_accumulated_s_ = stable ?
+      recovery_success_dwell_accumulated_s_ + dt : 0.0;
+
+    recovery_debug_.active = true;
+    recovery_debug_.extension_unlocked = recovery_extension_unlocked_;
+    recovery_debug_.joint_target = q_des;
+    recovery_debug_.measured_height_m = measured_height;
+    recovery_debug_.height_target_m = recovery_height_target_m_;
+    recovery_debug_.height_target_rate_mps = recovery_height_target_rate_mps_;
+    recovery_debug_.measured_leg_angle_rad = measured_leg_angle;
+    recovery_debug_.leg_angle_target_rad = recovery_leg_angle_target_rad_;
+    recovery_debug_.gravity_alignment_error_rad = alignment_error;
+    recovery_debug_.wheel_position_m = wheel_position_m;
+    recovery_debug_.wheel_velocity_mps = wheel_velocity_mps;
+    recovery_debug_.wheel_effort_nm = recovery_wheel_effort_nm_;
+    recovery_debug_.success_dwell_s = recovery_success_dwell_accumulated_s_;
+
+    HeightControlOutput height_debug;
+    height_debug.measured_m = measured_height;
+    height_debug.measured_rate_mps = recovery_debug_.measured_height_rate_mps;
+    height_debug.command_m = recovery_goal_height_m_;
+    height_debug.target_m = recovery_height_target_m_;
+    height_debug.target_rate_mps = recovery_height_target_rate_mps_;
+    BalanceDebug balance_debug;
+    balance_debug.policy_wheel_position_m = wheel_position_m;
+    balance_debug.policy_wheel_velocity_mps = wheel_velocity_mps;
+    balance_debug.combined_common_torque_each_nm = recovery_wheel_effort_nm_;
+    RollControlOutput roll_debug;
+    roll_debug.roll_filtered_rad = roll;
+    roll_debug.roll_rate_filtered_rad_s = roll_rate;
+    publish_debug(
+      dt, pitch, pitch_rate, q, q_des, left_state, right_state,
+      VmcOutput{}, VmcOutput{}, balance_debug, left_ik, right_ik,
+      roll_debug, height_debug, PolicyControlOutput{}, s.rc.right_x, recovery_debug_);
+
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 200,
+      "state=RECOVERY pitch=%+.2fdeg align=%+.2fdeg height=%.1f/%.1fmm "
+      "leg_angle=%+.1f/%+.1fdeg qerr=%.3frad tau_max=%.3fNm unlocked=%s "
+      "action=(%+.3f,%+.3f,%+.3f) wheel=%+.3f/%+.3fNm",
+      pitch * 180.0 / kPi, alignment_error * 180.0 / kPi,
+      1000.0 * measured_height, 1000.0 * recovery_height_target_m_,
+      measured_leg_angle * 180.0 / kPi,
+      recovery_leg_angle_target_rad_ * 180.0 / kPi,
+      max_recovery_joint_error,
+      max_recovery_joint_torque,
+      recovery_extension_unlocked_ ? "true" : "false",
+      recovery_previous_action_[0], recovery_previous_action_[1],
+      recovery_previous_action_[2], recovery_wheel_effort_nm_,
+      recovery_requested_wheel_effort_nm_);
+
+    if (recovery_success_dwell_accumulated_s_ >= recovery_success_dwell_s_) {
+      handoff_recovery_to_normal(
+        s, pitch, pitch_rate, yaw_rate, measured_height, roll, roll_rate, dt);
+    }
   }
 
   void control_step()
@@ -1255,7 +1833,7 @@ private:
       disarm("invalid attitude");
       return;
     }
-    if (std::abs(pitch) > fall_cutoff_rad_) {
+    if (!recovery_active_ && std::abs(pitch) > fall_cutoff_rad_) {
       disarm("pitch fall angle exceeded");
       return;
     }
@@ -1273,6 +1851,13 @@ private:
     const FiveBarState right_state = kinematics_.forward(q[2], q[3], qdot[2], qdot[3]);
     if (!left_state.valid || !right_state.valid) {
       disarm("five-bar FK invalid or singular");
+      return;
+    }
+
+    if (recovery_active_) {
+      control_recovery(
+        s, dt, roll, roll_rate, pitch, pitch_rate, yaw_rate,
+        q, qdot, left_state, right_state);
       return;
     }
 
@@ -1320,11 +1905,21 @@ private:
       right_vmc_config);
 
     const bool command_enable = !dry_run_;
+    const double handoff_blend = normal_handoff_active_ ? clamp_value(
+      normal_handoff_elapsed_s_ / std::max(recovery_handoff_blend_s_, 1.0e-6),
+      0.0, 1.0) : 1.0;
+    std::array<double, 4> blended_q_des = q_des;
+    if (normal_handoff_active_) {
+      for (std::size_t i = 0; i < blended_q_des.size(); ++i) {
+        blended_q_des[i] = normal_handoff_joint_target_[i] + handoff_blend *
+          (q_des[i] - normal_handoff_joint_target_[i]);
+      }
+    }
     const std::array<double, 4> p_des_motor{
-      calibrations_[kLeftJointA].joint_to_motor(q_des[0]),
-      calibrations_[kLeftJointB].joint_to_motor(q_des[1]),
-      calibrations_[kRightJointA].joint_to_motor(q_des[2]),
-      calibrations_[kRightJointB].joint_to_motor(q_des[3])};
+      calibrations_[kLeftJointA].joint_to_motor(blended_q_des[0]),
+      calibrations_[kLeftJointB].joint_to_motor(blended_q_des[1]),
+      calibrations_[kRightJointA].joint_to_motor(blended_q_des[2]),
+      calibrations_[kRightJointB].joint_to_motor(blended_q_des[3])};
     const std::array<double, 4> joint_torque{
       calibrations_[kLeftJointA].torque_sign * left_vmc.tau_a,
       calibrations_[kLeftJointB].torque_sign * left_vmc.tau_b,
@@ -1336,7 +1931,8 @@ private:
       const bool enabled = command_enable && joint_control_enable_;
       motor_pubs_[joint_indices[i]]->publish(make_mit_command(
         enabled, p_des_motor[i], 0.0, enabled ? joint_mit_kp_ : 0.0,
-        enabled ? joint_mit_kd_ : 0.0, enabled ? joint_torque[i] : 0.0,
+        enabled ? joint_mit_kd_ : 0.0,
+        enabled ? handoff_blend * joint_torque[i] : 0.0,
         joint_hard_torque_limit_nm_));
     }
 
@@ -1394,14 +1990,32 @@ private:
         balance_input, residual_torque_nm, final_torque_limit_nm, balance_output);
     }
     const bool wheel_enable = command_enable && balance_control_enable_ && balance_armed_;
+    const double left_wheel_command_nm = normal_handoff_active_ ?
+      (1.0 - handoff_blend) * recovery_wheel_output_sign_ *
+      balance_config_.left_encoder_sign *
+      normal_handoff_wheel_effort_nm_ + handoff_blend * balance_output.left_motor_torque_nm :
+      balance_output.left_motor_torque_nm;
+    const double right_wheel_command_nm = normal_handoff_active_ ?
+      (1.0 - handoff_blend) * recovery_wheel_output_sign_ *
+      balance_config_.right_encoder_sign *
+      normal_handoff_wheel_effort_nm_ + handoff_blend * balance_output.right_motor_torque_nm :
+      balance_output.right_motor_torque_nm;
     motor_pubs_[kLeftWheel]->publish(make_mit_command(
       wheel_enable, 0.0, 0.0, 0.0, 0.0,
-      wheel_enable ? balance_output.left_motor_torque_nm : 0.0,
+      wheel_enable ? left_wheel_command_nm : 0.0,
       balance_config_.hard_torque_limit_each_nm));
     motor_pubs_[kRightWheel]->publish(make_mit_command(
       wheel_enable, 0.0, 0.0, 0.0, 0.0,
-      wheel_enable ? balance_output.right_motor_torque_nm : 0.0,
+      wheel_enable ? right_wheel_command_nm : 0.0,
       balance_config_.hard_torque_limit_each_nm));
+
+    if (normal_handoff_active_) {
+      normal_handoff_elapsed_s_ += dt;
+      if (normal_handoff_elapsed_s_ >= recovery_handoff_blend_s_) {
+        normal_handoff_active_ = false;
+        RCLCPP_INFO(get_logger(), "NORMAL handoff blend complete");
+      }
+    }
 
     publish_debug(
       dt, pitch, pitch_rate, q, q_des, left_state, right_state, left_vmc,
@@ -1453,6 +2067,7 @@ private:
   std::array<JointCalibration, kMotorCount> calibrations_{};
   std::array<JointVelocityEstimator, 4> joint_velocity_estimators_{};
   PolicyRunner policy_{};
+  RecoveryPolicyRunner recovery_policy_{};
 
   double control_period_s_{0.003};
   std::string profile_name_{"mujoco_validated_hardware"};
@@ -1486,6 +2101,72 @@ private:
   double policy_residual_scale_nm_{0.060};
   double policy_final_torque_limit_each_nm_{0.260};
   double policy_previous_action_{0.0};
+
+  bool recovery_enable_{true};
+  std::string recovery_model_path_{};
+  double recovery_policy_period_s_{0.010};
+  double recovery_start_max_pitch_rad_{35.0 * kPi / 180.0};
+  double recovery_start_max_pitch_rate_rad_s_{4.0};
+  double recovery_terminate_pitch_rad_{70.0 * kPi / 180.0};
+  double recovery_max_duration_s_{8.0};
+  double recovery_max_wheel_travel_m_{0.80};
+  double recovery_wheel_torque_limit_nm_{0.45};
+  double recovery_wheel_output_sign_{1.0};
+  double recovery_wheel_torque_slew_nm_s_{2.0};
+  double recovery_height_min_m_{0.012};
+  double recovery_height_max_m_{0.130};
+  double recovery_goal_height_m_{0.120};
+  double recovery_height_rate_center_mps_{0.040};
+  double recovery_height_rate_span_mps_{0.100};
+  double recovery_height_rate_min_mps_{-0.040};
+  double recovery_height_rate_max_mps_{0.140};
+  double recovery_leg_angle_limit_rad_{35.0 * kPi / 180.0};
+  double recovery_leg_angle_rate_rad_s_{120.0 * kPi / 180.0};
+  double recovery_tilt_unlock_min_height_m_{0.020};
+  double recovery_tilt_unlock_full_height_m_{0.070};
+  double recovery_alignment_unlock_rad_{5.0 * kPi / 180.0};
+  double recovery_alignment_relock_rad_{8.0 * kPi / 180.0};
+  double recovery_alignment_unlock_dwell_s_{0.10};
+  double recovery_success_pitch_rad_{5.0 * kPi / 180.0};
+  double recovery_success_alignment_rad_{5.0 * kPi / 180.0};
+  double recovery_success_pitch_rate_rad_s_{0.35};
+  double recovery_success_height_tolerance_m_{0.010};
+  double recovery_success_wheel_velocity_mps_{0.30};
+  double recovery_success_dwell_s_{0.15};
+  double recovery_pitch_rate_filter_hz_{1.675};
+  double recovery_joint_kp_{7.0};
+  double recovery_joint_kd_{0.28};
+  double recovery_joint_torque_limit_nm_{1.5};
+  double recovery_left_alpha0_{2.4430524286};
+  double recovery_left_beta0_{0.6977234730};
+  double recovery_right_alpha0_{2.4438691429};
+  double recovery_right_beta0_{0.6985402266};
+  double recovery_hip_pivot_height_m_{0.1530};
+  double recovery_chassis_com_height_m_{0.1895};
+  double recovery_handoff_blend_s_{0.10};
+  WrappedAngleUnwrapper recovery_left_wheel_unwrapper_{};
+  WrappedAngleUnwrapper recovery_right_wheel_unwrapper_{};
+  FirstOrderLowPass recovery_pitch_rate_filter_{};
+  std::array<double, RecoveryPolicyRunner::kActionSize> recovery_previous_action_{};
+  std::array<double, 4> recovery_joint_target_{};
+  double recovery_height_target_m_{0.120};
+  double recovery_height_target_rate_mps_{0.0};
+  double recovery_leg_angle_target_rad_{0.0};
+  double recovery_last_measured_height_m_{0.120};
+  double recovery_wheel_effort_nm_{0.0};
+  double recovery_requested_wheel_effort_nm_{0.0};
+  double recovery_policy_phase_s_{0.0};
+  double recovery_observation_elapsed_s_{0.0};
+  double recovery_alignment_dwell_s_{0.0};
+  double recovery_success_dwell_accumulated_s_{0.0};
+  double recovery_elapsed_s_{0.0};
+  bool recovery_extension_unlocked_{false};
+  bool recovery_active_{false};
+  bool normal_handoff_active_{false};
+  double normal_handoff_elapsed_s_{0.0};
+  double normal_handoff_wheel_effort_nm_{0.0};
+  std::array<double, 4> normal_handoff_joint_target_{};
+  RecoveryControlOutput recovery_debug_{};
 
   std::string imu_pitch_axis_{"pitch"};
   std::string imu_pitch_rate_axis_{"y"};
