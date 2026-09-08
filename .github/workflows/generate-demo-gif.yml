@@ -35,7 +35,7 @@ jobs:
 
       - name: Commit generated GIF
         run: |
-          if git diff --quiet -- docs/assets/demo.gif; then
+          if [ -z "$(git status --porcelain -- docs/assets/demo.gif)" ]; then
             echo "No GIF changes to commit."
             exit 0
           fi
