@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Control-VMC%20%2B%20Cascade-2F855A" alt="VMC and Cascade Control">
 </p>
 
-<img src="docs/assets/robot_readme.jpg" width="520" alt="Wheel-legged self-balancing robot">
+<img src="docs/assets/D295D60F-BB3B-4AB2-A5D5-64C60618934B.png" width="520" alt="Wheel-legged self-balancing robot">
 
 </div>
 
@@ -25,23 +25,12 @@ The controller integrates **five-bar kinematics, VMC, wheel-balance control, yaw
 ## Demo
 
 <div align="center">
-  <img src="docs/assets/demo-placeholder.svg" width="760" alt="Demo video placeholder">
+  <a href="docs/assets/copy_81C3F3D5-9555-45DA-98A7-C2422D7B46FF.mov">
+    <img src="docs/assets/D295D60F-BB3B-4AB2-A5D5-64C60618934B.png" width="760" alt="Robot demo video">
+  </a>
+  <br>
+  <sub>▶ Click the image to play the real-robot demo video</sub>
 </div>
-
-<!--
-VIDEO SLOT
-1. Upload a real-robot video to: docs/assets/demo.mp4
-2. To make the placeholder clickable, replace the <img> block above with:
-
-<a href="docs/assets/demo.mp4">
-  <img src="docs/assets/demo-placeholder.svg" width="760" alt="Robot demo video">
-</a>
-
-Optional: for inline playback-like preview on GitHub, export a short GIF to
-`docs/assets/demo.gif` and replace the placeholder with:
-
-<img src="docs/assets/demo.gif" width="760" alt="Robot demo">
--->
 
 
 ## Quick Start
