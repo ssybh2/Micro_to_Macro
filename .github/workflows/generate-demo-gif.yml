@@ -1,0 +1,47 @@
+name: Generate Demo GIF
+
+on:
+  push:
+    paths:
+      - 'docs/assets/copy_81C3F3D5-9555-45DA-98A7-C2422D7B46FF.mov'
+      - '.github/workflows/generate-demo-gif.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-gif:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Generate optimized README GIF
+        run: |
+          ffmpeg -y \
+            -i "docs/assets/copy_81C3F3D5-9555-45DA-98A7-C2422D7B46FF.mov" \
+            -t 8 \
+            -vf "fps=8,scale=560:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=48[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3" \
+            -loop 0 \
+            "docs/assets/demo.gif"
+
+          ls -lh docs/assets/demo.gif
+
+      - name: Commit generated GIF
+        run: |
+          if git diff --quiet -- docs/assets/demo.gif; then
+            echo "No GIF changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/demo.gif
+          git commit -m "docs: update auto-playing robot demo GIF"
+          git push
