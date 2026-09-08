@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#17263f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4da3ff"/>
+      <stop offset="100%" stop-color="#7cc7ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" rx="28" fill="url(#bg)"/>
+  <rect x="2" y="2" width="1196" height="671" rx="26" fill="none" stroke="#34506f" stroke-width="4"/>
+  <path d="M90 525 C260 440, 380 575, 540 485 S850 390, 1110 455" fill="none" stroke="#31567d" stroke-width="3" stroke-dasharray="12 12"/>
+  <circle cx="600" cy="290" r="82" fill="none" stroke="#dcecff" stroke-width="6"/>
+  <polygon points="580,244 580,336 658,290" fill="#dcecff"/>
+  <rect x="440" y="100" width="320" height="8" rx="4" fill="url(#accent)"/>
+  <text x="600" y="425" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700" fill="#f3f8ff">Demo Video</text>
+  <text x="600" y="475" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#a9bdd3">Upload docs/assets/demo.mp4 or demo.gif</text>
+  <text x="600" y="565" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" letter-spacing="5" fill="#6f8ba8">REAL ROBOT · REAL LEARNING</text>
+</svg>
