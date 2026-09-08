@@ -25,11 +25,9 @@ The controller integrates **five-bar kinematics, VMC, wheel-balance control, yaw
 ## Demo
 
 <div align="center">
-  <a href="docs/assets/copy_81C3F3D5-9555-45DA-98A7-C2422D7B46FF.mov">
-    <img src="docs/assets/D295D60F-BB3B-4AB2-A5D5-64C60618934B.png" width="760" alt="Robot demo video">
-  </a>
+  <img src="docs/assets/demo.gif" width="760" alt="Wheel-legged robot reinforcement learning demo">
   <br>
-  <sub>▶ Click the image to play the real-robot demo video</sub>
+  <sub>Auto-playing real-robot preview · generated automatically from the source video</sub>
 </div>
 
 
