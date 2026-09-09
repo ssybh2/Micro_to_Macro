@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Control-VMC%20%2B%20Cascade-2F855A" alt="VMC and Cascade Control">
 </p>
 
-<img src="docs/assets/D295D60F-BB3B-4AB2-A5D5-64C60618934B.png" width="520" alt="Wheel-legged self-balancing robot">
+<img src="docs/assets/23932089-C25A-4158-B8F0-21E94B3AFA12.png" width="860" alt="Reinforcement learning wheel-legged robot">
 
 </div>
 
