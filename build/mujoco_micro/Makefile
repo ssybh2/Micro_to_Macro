@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/uonaim/mujoco_micro/src/mujoco_micro
+CMAKE_SOURCE_DIR = /home/hby/Micro_to_Macro/src/mujoco_micro
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/uonaim/mujoco_micro/build/mujoco_micro
+CMAKE_BINARY_DIR = /home/hby/Micro_to_Macro/build/mujoco_micro
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -142,9 +142,9 @@ install/strip/fast: preinstall/fast
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles /home/uonaim/mujoco_micro/build/mujoco_micro//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hby/Micro_to_Macro/build/mujoco_micro/CMakeFiles /home/hby/Micro_to_Macro/build/mujoco_micro//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hby/Micro_to_Macro/build/mujoco_micro/CMakeFiles 0
 .PHONY : all
 
 # The main clean target

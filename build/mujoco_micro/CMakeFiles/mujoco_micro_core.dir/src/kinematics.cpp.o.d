@@ -1,7 +1,7 @@
 CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o: \
- /home/uonaim/mujoco_micro/src/mujoco_micro/src/kinematics.cpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/src/kinematics.cpp \
  /usr/include/stdc-predef.h \
- /home/uonaim/mujoco_micro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
  /usr/include/c++/10/array /usr/include/c++/10/utility \
  /usr/include/x86_64-linux-gnu/c++/10/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/10/bits/os_defines.h \

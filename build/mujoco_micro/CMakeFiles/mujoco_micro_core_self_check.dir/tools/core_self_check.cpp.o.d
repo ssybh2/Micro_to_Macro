@@ -1,5 +1,5 @@
 CMakeFiles/mujoco_micro_core_self_check.dir/tools/core_self_check.cpp.o: \
- /home/uonaim/mujoco_micro/src/mujoco_micro/tools/core_self_check.cpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/tools/core_self_check.cpp \
  /usr/include/stdc-predef.h /usr/include/c++/10/cmath \
  /usr/include/x86_64-linux-gnu/c++/10/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/10/bits/os_defines.h \
@@ -170,7 +170,7 @@ CMakeFiles/mujoco_micro_core_self_check.dir/tools/core_self_check.cpp.o: \
  /usr/include/c++/10/bits/basic_ios.tcc \
  /usr/include/c++/10/bits/ostream.tcc /usr/include/c++/10/istream \
  /usr/include/c++/10/bits/istream.tcc \
- /home/uonaim/mujoco_micro/src/mujoco_micro/include/mujoco_micro/control_core.hpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/include/mujoco_micro/control_core.hpp \
  /usr/include/c++/10/algorithm /usr/include/c++/10/utility \
  /usr/include/c++/10/bits/stl_relops.h \
  /usr/include/c++/10/bits/stl_algo.h \
@@ -196,5 +196,5 @@ CMakeFiles/mujoco_micro_core_self_check.dir/tools/core_self_check.cpp.o: \
  /usr/include/c++/10/bits/stl_bvector.h \
  /usr/include/c++/10/bits/vector.tcc \
  /usr/include/c++/10/pstl/execution_defs.h \
- /home/uonaim/mujoco_micro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
  /usr/include/c++/10/cstddef

@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/uonaim/mujoco_micro/src/mujoco_micro
+CMAKE_SOURCE_DIR = /home/hby/Micro_to_Macro/src/mujoco_micro
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/uonaim/mujoco_micro/build/mujoco_micro
+CMAKE_BINARY_DIR = /home/hby/Micro_to_Macro/build/mujoco_micro
 
 # Utility rule file for uninstall.
 
@@ -78,6 +78,6 @@ CMakeFiles/uninstall.dir/clean:
 .PHONY : CMakeFiles/uninstall.dir/clean
 
 CMakeFiles/uninstall.dir/depend:
-	cd /home/uonaim/mujoco_micro/build/mujoco_micro && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/uonaim/mujoco_micro/src/mujoco_micro /home/uonaim/mujoco_micro/src/mujoco_micro /home/uonaim/mujoco_micro/build/mujoco_micro /home/uonaim/mujoco_micro/build/mujoco_micro /home/uonaim/mujoco_micro/build/mujoco_micro/CMakeFiles/uninstall.dir/DependInfo.cmake --color=$(COLOR)
+	cd /home/hby/Micro_to_Macro/build/mujoco_micro && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/hby/Micro_to_Macro/src/mujoco_micro /home/hby/Micro_to_Macro/src/mujoco_micro /home/hby/Micro_to_Macro/build/mujoco_micro /home/hby/Micro_to_Macro/build/mujoco_micro /home/hby/Micro_to_Macro/build/mujoco_micro/CMakeFiles/uninstall.dir/DependInfo.cmake --color=$(COLOR)
 .PHONY : CMakeFiles/uninstall.dir/depend
 

@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/uonaim/mujoco_micro/src/mujoco_micro/include
+CXX_INCLUDES = -I/home/hby/Micro_to_Macro/src/mujoco_micro/include
 
 CXX_FLAGS = -Wall -Wextra -Wpedantic -std=gnu++17
 

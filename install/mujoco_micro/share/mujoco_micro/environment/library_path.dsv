@@ -1,1 +1,1 @@
-/home/uonaim/mujoco_micro/build/mujoco_micro/ament_cmake_environment_hooks/library_path.dsv
+prepend-non-duplicate;LD_LIBRARY_PATH;lib

@@ -1,7 +1,7 @@
 CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o: \
- /home/uonaim/mujoco_micro/src/mujoco_micro/src/control_core.cpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/src/control_core.cpp \
  /usr/include/stdc-predef.h \
- /home/uonaim/mujoco_micro/src/mujoco_micro/include/mujoco_micro/control_core.hpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/include/mujoco_micro/control_core.hpp \
  /usr/include/c++/10/algorithm /usr/include/c++/10/utility \
  /usr/include/x86_64-linux-gnu/c++/10/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/10/bits/os_defines.h \
@@ -176,5 +176,5 @@ CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o: \
  /usr/include/x86_64-linux-gnu/bits/types/error_t.h \
  /usr/include/c++/10/bits/charconv.h \
  /usr/include/c++/10/bits/basic_string.tcc \
- /home/uonaim/mujoco_micro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
+ /home/hby/Micro_to_Macro/src/mujoco_micro/include/mujoco_micro/kinematics.hpp \
  /usr/include/c++/10/cstddef /usr/include/c++/10/stdexcept

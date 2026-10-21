@@ -8,8 +8,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/uonaim/mujoco_micro/src/mujoco_micro/src/control_core.cpp" "CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o" "gcc" "CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o.d"
-  "/home/uonaim/mujoco_micro/src/mujoco_micro/src/kinematics.cpp" "CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o" "gcc" "CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o.d"
+  "/home/hby/Micro_to_Macro/src/mujoco_micro/src/control_core.cpp" "CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o" "gcc" "CMakeFiles/mujoco_micro_core.dir/src/control_core.cpp.o.d"
+  "/home/hby/Micro_to_Macro/src/mujoco_micro/src/kinematics.cpp" "CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o" "gcc" "CMakeFiles/mujoco_micro_core.dir/src/kinematics.cpp.o.d"
   )
 
 # Targets to which this target links.
